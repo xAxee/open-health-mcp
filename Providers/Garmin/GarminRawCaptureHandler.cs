@@ -10,13 +10,15 @@ internal sealed class GarminRawCaptureHandler(
     {
         var response = await base.SendAsync(request, cancellationToken);
 
-        if (response.IsSuccessStatusCode && response.Content is not null)
+        if (response.IsSuccessStatusCode)
         {
-            var payload = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var payload = response.Content is null
+                ? []
+                : await response.Content.ReadAsByteArrayAsync(cancellationToken);
             collector.Capture(
                 request.RequestUri,
-                payload,
-                response.Content.Headers.ContentType?.MediaType);
+                response.StatusCode,
+                payload);
         }
 
         return response;

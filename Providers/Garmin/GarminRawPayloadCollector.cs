@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Net;
 
 namespace OpenHealthMCP.Providers.Garmin;
 
@@ -18,21 +19,20 @@ internal sealed class GarminRawPayloadCollector
         return new CaptureScope(this, state);
     }
 
-    public void Capture(Uri? requestUri, byte[] payload, string? mediaType)
+    public void Capture(Uri? requestUri, HttpStatusCode statusCode, byte[] payload)
     {
         var state = _activeCapture.Value;
-        if (state is null || requestUri is null || payload.Length == 0)
+        if (state is null || requestUri is null)
         {
             return;
         }
 
-        if (!requestUri.Host.Equals("connect.garmin.com", StringComparison.OrdinalIgnoreCase) ||
-            mediaType?.Contains("json", StringComparison.OrdinalIgnoreCase) != true)
+        if (!requestUri.Host.Equals("connect.garmin.com", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        state.Payloads.Add(new CapturedGarminPayload(requestUri, payload));
+        state.Payloads.Add(new CapturedGarminPayload(requestUri, statusCode, payload));
     }
 
     private void EndCapture(CaptureState state)
@@ -64,6 +64,9 @@ internal sealed class GarminRawPayloadCollector
 
         public CapturedGarminPayload? Last => _state.Payloads.LastOrDefault();
 
+        public CapturedGarminPayload? FindLast(string pathFragment) => _state.Payloads
+            .LastOrDefault(item => item.RequestUri.AbsolutePath.Contains(pathFragment, StringComparison.Ordinal));
+
         public void Dispose()
         {
             if (_disposed)
@@ -77,4 +80,7 @@ internal sealed class GarminRawPayloadCollector
     }
 }
 
-internal sealed record CapturedGarminPayload(Uri RequestUri, byte[] Payload);
+internal sealed record CapturedGarminPayload(Uri RequestUri, HttpStatusCode StatusCode, byte[] Payload)
+{
+    public bool HasContent => Payload.Length > 0 && StatusCode != HttpStatusCode.NoContent;
+}

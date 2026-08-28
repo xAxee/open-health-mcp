@@ -83,10 +83,16 @@ internal sealed class GarminProvider(
 
     private async Task<int> SyncDailySummaryAsync(DateOnly date, CancellationToken cancellationToken)
     {
-        using var capture = payloadCollector.BeginCapture();
-        var summary = await session.Client.GetUserSummary(date.ToDateTime(TimeOnly.MinValue), cancellationToken);
-        LogAuthenticationSucceeded();
-        var payload = RequirePayload(capture, "daily summary");
+        var payload = await FetchPayloadAsync(
+            "daily summary",
+            "/usersummary-service/usersummary/daily/",
+            () => session.Client.GetUserSummary(date.ToDateTime(TimeOnly.MinValue), cancellationToken),
+            cancellationToken);
+        if (payload is null)
+        {
+            return 0;
+        }
+
         using var document = JsonDocument.Parse(payload.Payload);
         var root = document.RootElement;
 
@@ -107,30 +113,24 @@ internal sealed class GarminProvider(
             },
             cancellationToken);
 
-        return summary is null ? 0 : 1;
+        return 1;
     }
 
     private async Task<int> SyncHeartRateAsync(DateOnly date, CancellationToken cancellationToken)
     {
-        using var capture = payloadCollector.BeginCapture();
-        var heartRate = await session.Client.GetWellnessHeartRates(date.ToDateTime(TimeOnly.MinValue), cancellationToken);
-        var payload = RequirePayload(capture, "heart rate");
+        var payload = await FetchPayloadAsync(
+            "heart rate",
+            "/wellness-service/wellness/dailyHeartRate/",
+            () => session.Client.GetWellnessHeartRates(date.ToDateTime(TimeOnly.MinValue), cancellationToken),
+            cancellationToken);
+        if (payload is null)
+        {
+            return 0;
+        }
+
         using var document = JsonDocument.Parse(payload.Payload);
         var root = document.RootElement;
-
-        int? averageHeartRate = null;
-        if (heartRate?.HeartRateValues is { Length: > 0 })
-        {
-            var measuredValues = heartRate.HeartRateValues
-                .Where(value => value.Length > 1 && value[1] > 0)
-                .Select(value => value[1])
-                .ToArray();
-
-            if (measuredValues.Length > 0)
-            {
-                averageHeartRate = Convert.ToInt32(Math.Round(measuredValues.Average()));
-            }
-        }
+        var averageHeartRate = GetAverageHeartRate(root);
 
         await UpsertDailySegmentAsync(
             date,
@@ -150,9 +150,16 @@ internal sealed class GarminProvider(
 
     private async Task<int> SyncSleepAsync(DateOnly date, CancellationToken cancellationToken)
     {
-        using var capture = payloadCollector.BeginCapture();
-        await session.Client.GetWellnessSleepData(date.ToDateTime(TimeOnly.MinValue), cancellationToken);
-        var payload = RequirePayload(capture, "sleep");
+        var payload = await FetchPayloadAsync(
+            "sleep",
+            "/wellness-service/wellness/dailySleepData/",
+            () => session.Client.GetWellnessSleepData(date.ToDateTime(TimeOnly.MinValue), cancellationToken),
+            cancellationToken);
+        if (payload is null)
+        {
+            return 0;
+        }
+
         using var document = JsonDocument.Parse(payload.Payload);
 
         double? sleepScore = null;
@@ -176,9 +183,16 @@ internal sealed class GarminProvider(
     private async Task<int> SyncHrvAsync(DateOnly date, CancellationToken cancellationToken)
     {
         var asDateTime = date.ToDateTime(TimeOnly.MinValue);
-        using var capture = payloadCollector.BeginCapture();
-        await session.Client.GetReportHrvStatus(asDateTime, asDateTime, cancellationToken);
-        var payload = RequirePayload(capture, "HRV");
+        var payload = await FetchPayloadAsync(
+            "HRV",
+            "/hrv-service/hrv/daily/",
+            () => session.Client.GetReportHrvStatus(asDateTime, asDateTime, cancellationToken),
+            cancellationToken);
+        if (payload is null)
+        {
+            return 0;
+        }
+
         using var document = JsonDocument.Parse(payload.Payload);
         double? hrv = null;
         if (TryGetProperty(document.RootElement, "hrvSummaries", out var summaries) &&
@@ -409,10 +423,78 @@ internal sealed class GarminProvider(
         }
     }
 
-    private static CapturedGarminPayload RequirePayload(
-        GarminRawPayloadCollector.CaptureScope capture,
-        string dataType) => capture.Last ?? throw new InvalidOperationException(
-        $"Garmin returned {dataType} without a capturable JSON payload.");
+    private async Task<CapturedGarminPayload?> FetchPayloadAsync<T>(
+        string dataType,
+        string endpointPath,
+        Func<Task<T>> request,
+        CancellationToken cancellationToken)
+    {
+        using var capture = payloadCollector.BeginCapture();
+
+        try
+        {
+            await request();
+            LogAuthenticationSucceeded();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var capturedAfterFailure = capture.FindLast(endpointPath);
+            if (capturedAfterFailure is null ||
+                !capturedAfterFailure.HasContent ||
+                !IsValidJson(capturedAfterFailure.Payload) ||
+                !IsRecoverableMappingFailure(exception))
+            {
+                throw;
+            }
+
+            logger.LogInformation(
+                "Using captured Garmin {DataType} JSON because the unofficial client could not map optional fields",
+                dataType);
+            LogAuthenticationSucceeded();
+            return capturedAfterFailure;
+        }
+
+        var captured = capture.FindLast(endpointPath) ?? throw new InvalidOperationException(
+            $"Garmin returned {dataType} without a capturable HTTP response.");
+
+        if (!captured.HasContent)
+        {
+            logger.LogDebug("Garmin returned no {DataType} data", dataType);
+            return null;
+        }
+
+        if (!IsValidJson(captured.Payload))
+        {
+            throw new JsonException($"Garmin returned invalid {dataType} JSON.");
+        }
+
+        return captured;
+    }
+
+    private static bool IsValidJson(byte[] payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            return document.RootElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsRecoverableMappingFailure(Exception exception)
+    {
+        var root = exception.GetBaseException();
+        return root is JsonException or FormatException ||
+               root is InvalidOperationException &&
+               root.Message.Contains("token type", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string SafeError(Exception exception)
     {
@@ -478,6 +560,37 @@ internal sealed class GarminProvider(
         TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Number
             ? value.GetDouble()
             : null;
+
+    private static int? GetAverageHeartRate(JsonElement root)
+    {
+        if (!TryGetProperty(root, "heartRateValues", out var values) || values.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var measuredValues = new List<double>();
+        foreach (var sample in values.EnumerateArray())
+        {
+            if (sample.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var parts = sample.EnumerateArray().ToArray();
+            if (parts.Length > 1 && parts[1].ValueKind == JsonValueKind.Number)
+            {
+                var value = parts[1].GetDouble();
+                if (value > 0)
+                {
+                    measuredValues.Add(value);
+                }
+            }
+        }
+
+        return measuredValues.Count == 0
+            ? null
+            : Convert.ToInt32(Math.Round(measuredValues.Average()));
+    }
 
     private static string GetActivityType(GarminActivity activity, string rawJson)
     {
