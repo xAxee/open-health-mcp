@@ -15,6 +15,8 @@ public sealed record DayResult(
     double? SleepScore,
     int? Calories);
 
+public sealed record DayLookupResult(bool Found, DayResult? Data);
+
 public sealed record ActivityResult(
     string Source,
     string ActivityId,
@@ -27,6 +29,8 @@ public sealed record ActivityResult(
     int? AverageHeartRate,
     int? MaxHeartRate,
     double? ElevationGainMeters);
+
+public sealed record ActivityLookupResult(bool Found, ActivityResult? Data);
 
 public sealed record TrendValue(DateOnly Date, double Value);
 

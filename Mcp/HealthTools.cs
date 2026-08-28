@@ -16,17 +16,17 @@ public sealed class HealthTools
 
     [McpServerTool(Name = "get_day", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
     [Description("Returns normalized health metrics for one calendar day. It provides data, not medical advice.")]
-    public static async Task<DayResult?> GetDayAsync(
+    public static async Task<DayLookupResult> GetDayAsync(
         [Description("Calendar date in YYYY-MM-DD format.")] string date,
-        [Description("Optional provider source. Defaults to garmin.")] string? source,
         IDbContextFactory<AppDbContext> dbContextFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [Description("Optional provider source. Defaults to garmin.")] string? source = null)
     {
         var parsedDate = ParseDate(date, nameof(date));
         var normalizedSource = NormalizeSource(source);
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        return await dbContext.DailyMetrics
+        var result = await dbContext.DailyMetrics
             .AsNoTracking()
             .Where(item => item.Source == normalizedSource && item.Date == parsedDate)
             .Select(item => new DayResult(
@@ -44,6 +44,8 @@ public sealed class HealthTools
                 item.SleepScore,
                 item.Calories))
             .SingleOrDefaultAsync(cancellationToken);
+
+        return new DayLookupResult(result is not null, result);
     }
 
     [McpServerTool(Name = "get_activities", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
@@ -51,10 +53,10 @@ public sealed class HealthTools
     public static async Task<IReadOnlyList<ActivityResult>> GetActivitiesAsync(
         [Description("Inclusive start date in YYYY-MM-DD format.")] string from,
         [Description("Inclusive end date in YYYY-MM-DD format.")] string to,
-        [Description("Optional normalized activity type.")] string? activityType,
-        [Description("Optional result limit; defaults to 50 and cannot exceed 200.")] int? limit,
         IDbContextFactory<AppDbContext> dbContextFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [Description("Optional normalized activity type.")] string? activityType = null,
+        [Description("Optional result limit; defaults to 50 and cannot exceed 200.")] int? limit = null)
     {
         var (fromDate, toDate) = ParseRange(from, to, MaximumRangeDays);
         var effectiveLimit = limit ?? DefaultActivityLimit;
@@ -85,7 +87,7 @@ public sealed class HealthTools
 
     [McpServerTool(Name = "get_activity", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
     [Description("Returns one normalized activity by provider activity identifier.")]
-    public static async Task<ActivityResult?> GetActivityAsync(
+    public static async Task<ActivityLookupResult> GetActivityAsync(
         [Description("Provider activity identifier.")] string activityId,
         IDbContextFactory<AppDbContext> dbContextFactory,
         CancellationToken cancellationToken)
@@ -97,12 +99,14 @@ public sealed class HealthTools
 
         var normalizedId = activityId.Trim();
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.Activities
+        var result = await dbContext.Activities
             .AsNoTracking()
             .Where(item => item.ExternalId == normalizedId)
             .OrderByDescending(item => item.Source == DefaultSource)
             .Select(ToActivityResult())
             .FirstOrDefaultAsync(cancellationToken);
+
+        return new ActivityLookupResult(result is not null, result);
     }
 
     [McpServerTool(Name = "get_trend", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
@@ -111,9 +115,9 @@ public sealed class HealthTools
         [Description("One of: steps, resting_heart_rate, hrv, stress, body_battery_max, sleep_score.")] string metric,
         [Description("Inclusive start date in YYYY-MM-DD format.")] string from,
         [Description("Inclusive end date in YYYY-MM-DD format.")] string to,
-        [Description("Optional provider source. Defaults to garmin.")] string? source,
         IDbContextFactory<AppDbContext> dbContextFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [Description("Optional provider source. Defaults to garmin.")] string? source = null)
     {
         var normalizedMetric = NormalizeMetric(metric);
         var normalizedSource = NormalizeSource(source);
@@ -146,9 +150,9 @@ public sealed class HealthTools
         [Description("Inclusive period A end date in YYYY-MM-DD format.")] string periodATo,
         [Description("Inclusive period B start date in YYYY-MM-DD format.")] string periodBFrom,
         [Description("Inclusive period B end date in YYYY-MM-DD format.")] string periodBTo,
-        [Description("Optional provider source. Defaults to garmin.")] string? source,
         IDbContextFactory<AppDbContext> dbContextFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [Description("Optional provider source. Defaults to garmin.")] string? source = null)
     {
         var normalizedMetric = NormalizeMetric(metric);
         var normalizedSource = NormalizeSource(source);
@@ -172,9 +176,10 @@ public sealed class HealthTools
 
         var averageA = Average(periodA);
         var averageB = Average(periodB);
-        var difference = averageA.HasValue && averageB.HasValue ? averageB - averageA : null;
-        var percentageChange = difference.HasValue && averageA is not null && averageA != 0
-            ? difference / averageA * 100
+        var signedDifference = averageA.HasValue && averageB.HasValue ? averageB - averageA : null;
+        double? absoluteDifference = signedDifference.HasValue ? Math.Abs(signedDifference.Value) : null;
+        var percentageChange = signedDifference.HasValue && averageA is not null && averageA != 0
+            ? signedDifference / averageA * 100
             : null;
 
         return new ComparePeriodsResult(
@@ -186,7 +191,7 @@ public sealed class HealthTools
             normalizedSource,
             averageA,
             averageB,
-            difference,
+            absoluteDifference,
             percentageChange,
             periodA.Count,
             periodB.Count);

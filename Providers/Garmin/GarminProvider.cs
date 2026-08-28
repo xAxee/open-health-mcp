@@ -10,6 +10,7 @@ internal sealed class GarminProvider(
     IDbContextFactory<AppDbContext> dbContextFactory,
     GarminClientSession session,
     GarminRawPayloadCollector payloadCollector,
+    GarminOptions options,
     ILogger<GarminProvider> logger) : IHealthDataProvider
 {
     private const string SourceName = "garmin";
@@ -19,6 +20,12 @@ internal sealed class GarminProvider(
 
     public async Task SyncAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken)
     {
+        if (!options.IsConfigured)
+        {
+            throw new InvalidOperationException(
+                "Garmin is not configured. Set GARMIN_EMAIL and GARMIN_PASSWORD.");
+        }
+
         if (from > to)
         {
             throw new ArgumentException("The synchronization start date must not be after the end date.");
@@ -85,7 +92,7 @@ internal sealed class GarminProvider(
 
         await UpsertDailySegmentAsync(
             date,
-            "daily_summary",
+            "daily",
             payload.Payload,
             metric =>
             {
@@ -170,15 +177,30 @@ internal sealed class GarminProvider(
     {
         var asDateTime = date.ToDateTime(TimeOnly.MinValue);
         using var capture = payloadCollector.BeginCapture();
-        var report = await session.Client.GetReportHrvStatus(asDateTime, asDateTime, cancellationToken);
+        await session.Client.GetReportHrvStatus(asDateTime, asDateTime, cancellationToken);
         var payload = RequirePayload(capture, "HRV");
-        var summary = report?.HrvSummaries?.FirstOrDefault(item => item.CalendarDate == date);
+        using var document = JsonDocument.Parse(payload.Payload);
+        double? hrv = null;
+        if (TryGetProperty(document.RootElement, "hrvSummaries", out var summaries) &&
+            summaries.ValueKind == JsonValueKind.Array)
+        {
+            var dateText = date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            var summary = summaries.EnumerateArray().FirstOrDefault(item =>
+                TryGetProperty(item, "calendarDate", out var calendarDate) &&
+                calendarDate.ValueKind == JsonValueKind.String &&
+                calendarDate.GetString() == dateText);
+
+            if (summary.ValueKind == JsonValueKind.Object)
+            {
+                hrv = GetDouble(summary, "lastNightAvg");
+            }
+        }
 
         await UpsertDailySegmentAsync(
             date,
             "hrv",
             payload.Payload,
-            metric => metric.Hrv = summary is null ? null : summary.LastNightAvg,
+            metric => metric.Hrv = hrv,
             cancellationToken);
 
         return 1;
@@ -192,21 +214,34 @@ internal sealed class GarminProvider(
             to.ToDateTime(TimeOnly.MaxValue),
             string.Empty,
             cancellationToken);
-        var payload = RequirePayload(capture, "activities");
-
-        using var document = JsonDocument.Parse(payload.Payload);
-        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        var activityPayloads = capture.Payloads
+            .Where(item => item.RequestUri.AbsolutePath.Contains(
+                "/activitylist-service/activities/search/activities",
+                StringComparison.Ordinal))
+            .ToArray();
+        if (activityPayloads.Length == 0 && activities is { Length: > 0 })
         {
-            throw new JsonException("Garmin activities response was not a JSON array.");
+            throw new InvalidOperationException(
+                "Garmin returned activities without capturable JSON payloads.");
         }
 
-        var rawById = document.RootElement
-            .EnumerateArray()
-            .Where(element => element.TryGetProperty("activityId", out _))
-            .ToDictionary(
-                element => element.GetProperty("activityId").ToString(),
-                element => element.GetRawText(),
-                StringComparer.Ordinal);
+        var rawById = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var payload in activityPayloads)
+        {
+            using var document = JsonDocument.Parse(payload.Payload);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new JsonException("Garmin activities response was not a JSON array.");
+            }
+
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                if (element.TryGetProperty("activityId", out var activityId))
+                {
+                    rawById[activityId.ToString()] = element.GetRawText();
+                }
+            }
+        }
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
@@ -219,6 +254,9 @@ internal sealed class GarminProvider(
             {
                 throw new JsonException($"Garmin activity {externalId} was missing from its raw response.");
             }
+
+            using var rawDocument = JsonDocument.Parse(rawJson);
+            var rawActivity = rawDocument.RootElement;
 
             var activity = await dbContext.Activities.SingleOrDefaultAsync(
                 item => item.Source == SourceName && item.ExternalId == externalId,
@@ -242,12 +280,12 @@ internal sealed class GarminProvider(
             activity.Name = garminActivity.ActivityName ?? "Unnamed activity";
             activity.ActivityType = GetActivityType(garminActivity, rawJson);
             activity.StartedAt = ToUtcOffset(garminActivity.StartTimeGmt);
-            activity.DurationSeconds = GetPositiveOrNull(garminActivity.Duration);
-            activity.DistanceMeters = GetPositiveOrNull(garminActivity.Distance);
-            activity.Calories = GetPositiveIntOrNull(garminActivity.Calories);
-            activity.AverageHeartRate = GetPositiveIntOrNull(garminActivity.AverageHr);
-            activity.MaxHeartRate = GetPositiveIntOrNull(garminActivity.MaxHr);
-            activity.ElevationGainMeters = GetPositiveOrNull(garminActivity.ElevationGain);
+            activity.DurationSeconds = GetDouble(rawActivity, "duration");
+            activity.DistanceMeters = GetDouble(rawActivity, "distance");
+            activity.Calories = GetInt32(rawActivity, "calories");
+            activity.AverageHeartRate = GetInt32(rawActivity, "averageHR");
+            activity.MaxHeartRate = GetInt32(rawActivity, "maxHR");
+            activity.ElevationGainMeters = GetDouble(rawActivity, "elevationGain");
             activity.UpdatedAt = now;
 
             await UpsertRawAsync(
@@ -350,8 +388,15 @@ internal sealed class GarminProvider(
         }
         catch (Exception exception)
         {
-            logger.LogWarning("Garmin synchronization unit failed: {Unit}. {Error}", unit, SafeError(exception));
-            failures.Add(new InvalidOperationException($"Failed to synchronize {unit}: {SafeError(exception)}"));
+            var safeError = SafeError(exception);
+            logger.LogWarning("Garmin synchronization unit failed: {Unit}. {Error}", unit, safeError);
+
+            if (IsFatalProviderFailure(exception))
+            {
+                throw new InvalidOperationException(safeError);
+            }
+
+            failures.Add(new InvalidOperationException($"Failed to synchronize {unit}: {safeError}"));
             return 0;
         }
     }
@@ -369,11 +414,42 @@ internal sealed class GarminProvider(
         string dataType) => capture.Last ?? throw new InvalidOperationException(
         $"Garmin returned {dataType} without a capturable JSON payload.");
 
-    private static string SafeError(Exception exception) => exception switch
+    private static string SafeError(Exception exception)
     {
-        AggregateException aggregate => aggregate.GetBaseException().Message,
-        _ => exception.Message
-    };
+        var root = exception.GetBaseException();
+        var typeName = root.GetType().Name;
+
+        if (typeName.Contains("Authentication", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Garmin authentication failed. Verify credentials, MFA code, and persisted session state.";
+        }
+
+        if (typeName.Contains("TooManyRequests", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Garmin rate limit was reached. Retry later.";
+        }
+
+        if (root is HttpRequestException or TimeoutException or TaskCanceledException)
+        {
+            return "Garmin network request failed. Verify connectivity and retry.";
+        }
+
+        if (root is JsonException or FormatException)
+        {
+            return "Garmin returned a malformed or unsupported response.";
+        }
+
+        return root.Message.Length <= 500 ? root.Message : root.Message[..500];
+    }
+
+    private static bool IsFatalProviderFailure(Exception exception)
+    {
+        var root = exception.GetBaseException();
+        var typeName = root.GetType().Name;
+        return typeName.Contains("Authentication", StringComparison.OrdinalIgnoreCase) ||
+               typeName.Contains("TooManyRequests", StringComparison.OrdinalIgnoreCase) ||
+               root is HttpRequestException or TimeoutException or TaskCanceledException;
+    }
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
     {
@@ -419,8 +495,4 @@ internal sealed class GarminProvider(
     private static DateTimeOffset ToUtcOffset(DateTime value) =>
         new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
 
-    private static double? GetPositiveOrNull(double value) => value > 0 ? value : null;
-
-    private static int? GetPositiveIntOrNull(double value) =>
-        value > 0 ? Convert.ToInt32(Math.Round(value)) : null;
 }
