@@ -164,14 +164,14 @@ public sealed class HealthSyncService(
         return state;
     }
 
-    private static void ValidateRange(DateOnly from, DateOnly to)
+    private void ValidateRange(DateOnly from, DateOnly to)
     {
         if (from > to)
         {
             throw new ArgumentException("The synchronization start date must not be after the end date.");
         }
 
-        if (to > DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1))
+        if (to > DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime))
         {
             throw new ArgumentException("The synchronization range must not extend into the future.");
         }
