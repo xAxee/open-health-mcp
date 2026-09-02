@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.vs
+.vscode
+bin
+obj
+garmin-session
+.garmin-session
+README.md
+docs
