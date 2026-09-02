@@ -29,7 +29,8 @@ public static class OAuthEndpoints
             response_modes_supported = new[] { "query" },
             grant_types_supported = new[] { "authorization_code", "refresh_token" },
             token_endpoint_auth_methods_supported = new[] { "none" },
-            code_challenge_methods_supported = new[] { "S256" }
+            code_challenge_methods_supported = new[] { "S256" },
+            authorization_response_iss_parameter_supported = true
         }));
 
         app.MapPost("/oauth/register", RegisterClientAsync).RequireRateLimiting("OAuthRegistration");
@@ -77,6 +78,7 @@ public static class OAuthEndpoints
     private static async Task<IResult> ApproveAuthorizationAsync(
         HttpRequest request,
         OAuthService oauthService,
+        OAuthOptions options,
         CancellationToken cancellationToken)
     {
         if (!request.HasFormContentType)
@@ -97,7 +99,8 @@ public static class OAuthEndpoints
             return RedirectWithParameters(authorizationRequest.RedirectUri, new Dictionary<string, string?>
             {
                 ["error"] = "access_denied",
-                ["state"] = authorizationRequest.State
+                ["state"] = authorizationRequest.State,
+                ["iss"] = options.BaseUrl
             });
         }
 
@@ -114,7 +117,8 @@ public static class OAuthEndpoints
         return RedirectWithParameters(authorizationRequest.RedirectUri, new Dictionary<string, string?>
         {
             ["code"] = code,
-            ["state"] = authorizationRequest.State
+            ["state"] = authorizationRequest.State,
+            ["iss"] = options.BaseUrl
         });
     }
 
@@ -176,12 +180,22 @@ public static class OAuthEndpoints
         response.Headers.ContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
     }
 
-    private static RedirectHttpResult RedirectWithParameters(string redirectUri, IReadOnlyDictionary<string, string?> parameters)
+    private static IResult RedirectWithParameters(string redirectUri, IReadOnlyDictionary<string, string?> parameters)
     {
         var separator = redirectUri.Contains('?', StringComparison.Ordinal) ? '&' : '?';
         var query = string.Join('&', parameters.Select(pair =>
             $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value ?? string.Empty)}"));
-        return TypedResults.Redirect($"{redirectUri}{separator}{query}");
+        return new SeeOtherResult($"{redirectUri}{separator}{query}");
+    }
+
+    private sealed class SeeOtherResult(string location) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status303SeeOther;
+            httpContext.Response.Headers.Location = location;
+            return Task.CompletedTask;
+        }
     }
 
     private static string RenderConsentPage(

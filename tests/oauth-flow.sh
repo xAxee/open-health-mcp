@@ -73,6 +73,8 @@ curl --fail --silent --show-error "${BASE_URL}/.well-known/oauth-authorization-s
     --output "${authorization_metadata}"
 [[ "$(json_value "${authorization_metadata}" issuer)" == "${OAUTH_ISSUER}" ]] \
     || fail "authorization server metadata has the wrong issuer"
+[[ "$(json_value "${authorization_metadata}" authorization_response_iss_parameter_supported)" == "True" ]] \
+    || fail "authorization server metadata does not advertise issuer identification"
 
 challenge_headers="${TEMP_DIR}/challenge.headers"
 challenge_status=$(curl --silent --show-error --output /dev/null --dump-header "${challenge_headers}" \
@@ -129,11 +131,13 @@ approval_status=$(curl --silent --show-error --output /dev/null --dump-header "$
     --write-out '%{http_code}' --request POST "${BASE_URL}/oauth/authorize" \
     --header 'Content-Type: application/x-www-form-urlencoded' \
     --data "${authorize_query}&decision=approve&owner_password=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${OWNER_PASSWORD}")")
-expect_status 302 "${approval_status}" "authorization approval"
+expect_status 303 "${approval_status}" "authorization approval"
 location=$(grep -i '^location:' "${approval_headers}" | tail -n 1 | tr -d '\r' | cut -d' ' -f2-)
 code=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.parse_qs(urllib.parse.urlsplit(sys.argv[1]).query)["code"][0])' "${location}")
 returned_state=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.parse_qs(urllib.parse.urlsplit(sys.argv[1]).query)["state"][0])' "${location}")
+returned_issuer=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.parse_qs(urllib.parse.urlsplit(sys.argv[1]).query)["iss"][0])' "${location}")
 [[ "${returned_state}" == "${state}" ]] || fail "authorization response state does not match"
+[[ "${returned_issuer}" == "${OAUTH_ISSUER}" ]] || fail "authorization response issuer does not match"
 
 wrong_verifier_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
     --request POST "${BASE_URL}/oauth/token" \
