@@ -233,6 +233,7 @@ internal sealed class GarminProvider(
                 "/activitylist-service/activities/search/activities",
                 StringComparison.Ordinal))
             .ToArray();
+        capture.Dispose();
         if (activityPayloads.Length == 0 && activities is { Length: > 0 })
         {
             throw new InvalidOperationException(
@@ -260,6 +261,7 @@ internal sealed class GarminProvider(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var count = 0;
+        var summariesByExternalId = new Dictionary<string, GarminActivitySummaryData>(StringComparer.Ordinal);
 
         foreach (var garminActivity in activities ?? [])
         {
@@ -271,6 +273,8 @@ internal sealed class GarminProvider(
 
             using var rawDocument = JsonDocument.Parse(rawJson);
             var rawActivity = rawDocument.RootElement;
+            var summary = GarminActivityPayloadParser.ParseSummary(rawActivity);
+            summariesByExternalId[externalId] = summary;
 
             var activity = await dbContext.Activities.SingleOrDefaultAsync(
                 item => item.Source == SourceName && item.ExternalId == externalId,
@@ -294,12 +298,7 @@ internal sealed class GarminProvider(
             activity.Name = garminActivity.ActivityName ?? "Unnamed activity";
             activity.ActivityType = GetActivityType(garminActivity, rawJson);
             activity.StartedAt = ToUtcOffset(garminActivity.StartTimeGmt);
-            activity.DurationSeconds = GetDouble(rawActivity, "duration");
-            activity.DistanceMeters = GetDouble(rawActivity, "distance");
-            activity.Calories = GetInt32(rawActivity, "calories");
-            activity.AverageHeartRate = GetInt32(rawActivity, "averageHR");
-            activity.MaxHeartRate = GetInt32(rawActivity, "maxHR");
-            activity.ElevationGainMeters = GetDouble(rawActivity, "elevationGain");
+            ApplySummary(activity, summary);
             activity.UpdatedAt = now;
 
             await UpsertRawAsync(
@@ -313,8 +312,305 @@ internal sealed class GarminProvider(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await EnrichActivitiesAsync(summariesByExternalId, cancellationToken);
         return count;
     }
+
+    private async Task EnrichActivitiesAsync(
+        IReadOnlyDictionary<string, GarminActivitySummaryData> summariesByExternalId,
+        CancellationToken cancellationToken)
+    {
+        if (options.ActivityEnrichmentLimit == 0 || summariesByExternalId.Count == 0)
+        {
+            return;
+        }
+
+        var externalIds = summariesByExternalId.Keys.ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var recentActivityThreshold = now.AddDays(-7);
+        var refreshThreshold = now.AddHours(-24);
+        await using var lookupContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var candidates = await lookupContext.Activities
+            .AsNoTracking()
+            .Where(item => item.Source == SourceName &&
+                           externalIds.Contains(item.ExternalId) &&
+                           (item.LapsSyncedAt == null ||
+                            item.HeartRateZonesSyncedAt == null ||
+                            item.StartedAt >= recentActivityThreshold &&
+                            (item.LapsSyncedAt < refreshThreshold ||
+                             item.HeartRateZonesSyncedAt < refreshThreshold)))
+            .OrderByDescending(item => item.StartedAt)
+            .Take(options.ActivityEnrichmentLimit)
+            .ToListAsync(cancellationToken);
+
+        foreach (var activity in candidates)
+        {
+            var summary = summariesByExternalId[activity.ExternalId];
+            var refreshRecent = activity.StartedAt >= recentActivityThreshold;
+            if (activity.LapsSyncedAt is null ||
+                refreshRecent && activity.LapsSyncedAt < refreshThreshold)
+            {
+                await using var lapsContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var lapsActivity = await lapsContext.Activities.SingleAsync(
+                    item => item.Id == activity.Id,
+                    cancellationToken);
+                if (summary.HasSplits == false)
+                {
+                    var existingLaps = await lapsContext.ActivityLaps
+                        .Where(item => item.ActivityId == lapsActivity.Id)
+                        .ToListAsync(cancellationToken);
+                    lapsContext.ActivityLaps.RemoveRange(existingLaps);
+                    lapsActivity.LapsSyncedAt = DateTimeOffset.UtcNow;
+                    await lapsContext.SaveChangesAsync(cancellationToken);
+                }
+                else
+                {
+                    await TrySyncActivityLapsAsync(lapsContext, lapsActivity, cancellationToken);
+                    await DelayEnrichmentAsync(cancellationToken);
+                }
+            }
+
+            if (activity.HeartRateZonesSyncedAt is null ||
+                refreshRecent && activity.HeartRateZonesSyncedAt < refreshThreshold)
+            {
+                await using var zonesContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var zonesActivity = await zonesContext.Activities.SingleAsync(
+                    item => item.Id == activity.Id,
+                    cancellationToken);
+                if (!summary.AverageHeartRate.HasValue && !summary.MaxHeartRate.HasValue)
+                {
+                    zonesActivity.HeartRateZonesSyncedAt = DateTimeOffset.UtcNow;
+                    await zonesContext.SaveChangesAsync(cancellationToken);
+                }
+                else
+                {
+                    await TrySyncActivityHeartRateZonesAsync(zonesContext, zonesActivity, cancellationToken);
+                    await DelayEnrichmentAsync(cancellationToken);
+                }
+            }
+        }
+    }
+
+    private async Task TrySyncActivityLapsAsync(
+        AppDbContext dbContext,
+        Activity activity,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var endpoint = $"/activity-service/activity/{activity.ExternalId}/splits";
+            var payload = await FetchPayloadAsync(
+                "activity splits",
+                endpoint,
+                () => session.Client.GetActivitySplits(
+                    long.Parse(activity.ExternalId, System.Globalization.CultureInfo.InvariantCulture),
+                    cancellationToken),
+                cancellationToken);
+            if (payload is null)
+            {
+                activity.LapsSyncedAt = DateTimeOffset.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            using var document = JsonDocument.Parse(payload.Payload);
+            var laps = GarminActivityPayloadParser.ParseLaps(document.RootElement);
+            var existing = await dbContext.ActivityLaps
+                .Where(item => item.ActivityId == activity.Id)
+                .ToListAsync(cancellationToken);
+            dbContext.ActivityLaps.RemoveRange(existing);
+            dbContext.ActivityLaps.AddRange(laps.Select(lap => ToEntity(activity, lap)));
+
+            var now = DateTimeOffset.UtcNow;
+            activity.LapsSyncedAt = now;
+            await UpsertRawAsync(
+                dbContext,
+                "activity_splits",
+                activity.ExternalId,
+                JsonDocument.Parse(payload.Payload),
+                now,
+                cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            if (IsUnsupportedEnrichment(exception))
+            {
+                activity.LapsSyncedAt = DateTimeOffset.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            HandleEnrichmentFailure(activity.ExternalId, "splits", exception);
+        }
+    }
+
+    private async Task TrySyncActivityHeartRateZonesAsync(
+        AppDbContext dbContext,
+        Activity activity,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var endpoint = $"/activity-service/activity/{activity.ExternalId}/hrTimeInZones";
+            var payload = await FetchPayloadAsync(
+                "activity heart rate zones",
+                endpoint,
+                () => session.Client.GetActivityHrInTimezones(
+                    long.Parse(activity.ExternalId, System.Globalization.CultureInfo.InvariantCulture),
+                    cancellationToken),
+                cancellationToken);
+            if (payload is null)
+            {
+                activity.HeartRateZonesSyncedAt = DateTimeOffset.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            using var document = JsonDocument.Parse(payload.Payload);
+            var zones = GarminActivityPayloadParser.ParseHeartRateZones(document.RootElement);
+            var existing = await dbContext.ActivityHeartRateZones
+                .Where(item => item.ActivityId == activity.Id)
+                .ToListAsync(cancellationToken);
+            dbContext.ActivityHeartRateZones.RemoveRange(existing);
+            dbContext.ActivityHeartRateZones.AddRange(zones.Select(zone => ToEntity(activity, zone)));
+
+            var now = DateTimeOffset.UtcNow;
+            activity.HeartRateZonesSyncedAt = now;
+            await UpsertRawAsync(
+                dbContext,
+                "activity_hr_zones",
+                activity.ExternalId,
+                JsonDocument.Parse(payload.Payload),
+                now,
+                cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            if (IsUnsupportedEnrichment(exception))
+            {
+                activity.HeartRateZonesSyncedAt = DateTimeOffset.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            HandleEnrichmentFailure(activity.ExternalId, "heart rate zones", exception);
+        }
+    }
+
+    private void HandleEnrichmentFailure(string externalId, string dataType, Exception exception)
+    {
+        var safeError = SafeError(exception);
+        if (IsFatalProviderFailure(exception))
+        {
+            throw new InvalidOperationException(safeError);
+        }
+
+        logger.LogWarning(
+            "Garmin activity {ActivityId} {DataType} enrichment failed and will be retried: {Error}",
+            externalId,
+            dataType,
+            safeError);
+    }
+
+    private static bool IsUnsupportedEnrichment(Exception exception) =>
+        exception.GetBaseException() is HttpRequestException
+        {
+            StatusCode: System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.NotFound
+        };
+
+    private Task DelayEnrichmentAsync(CancellationToken cancellationToken) =>
+        options.ActivityEnrichmentDelayMilliseconds == 0
+            ? Task.CompletedTask
+            : Task.Delay(options.ActivityEnrichmentDelayMilliseconds, cancellationToken);
+
+    private static void ApplySummary(Activity activity, GarminActivitySummaryData summary)
+    {
+        activity.DurationSeconds = summary.DurationSeconds ?? activity.DurationSeconds;
+        activity.ElapsedDurationSeconds = summary.ElapsedDurationSeconds ?? activity.ElapsedDurationSeconds;
+        activity.MovingDurationSeconds = summary.MovingDurationSeconds ?? activity.MovingDurationSeconds;
+        activity.DistanceMeters = summary.DistanceMeters ?? activity.DistanceMeters;
+        activity.Calories = summary.Calories ?? activity.Calories;
+        activity.AverageHeartRate = summary.AverageHeartRate ?? activity.AverageHeartRate;
+        activity.MaxHeartRate = summary.MaxHeartRate ?? activity.MaxHeartRate;
+        activity.ElevationGainMeters = summary.ElevationGainMeters ?? activity.ElevationGainMeters;
+        activity.ElevationLossMeters = summary.ElevationLossMeters ?? activity.ElevationLossMeters;
+        activity.AverageSpeedMetersPerSecond =
+            summary.AverageSpeedMetersPerSecond ?? activity.AverageSpeedMetersPerSecond;
+        activity.MaxSpeedMetersPerSecond = summary.MaxSpeedMetersPerSecond ?? activity.MaxSpeedMetersPerSecond;
+        activity.AveragePaceSecondsPerKilometer =
+            summary.AveragePaceSecondsPerKilometer ?? activity.AveragePaceSecondsPerKilometer;
+        activity.Steps = summary.Steps ?? activity.Steps;
+        activity.AverageCadence = summary.AverageCadence ?? activity.AverageCadence;
+        activity.MaxCadence = summary.MaxCadence ?? activity.MaxCadence;
+        activity.CadenceUnit = summary.CadenceUnit ?? activity.CadenceUnit;
+        activity.AveragePowerWatts = summary.AveragePowerWatts ?? activity.AveragePowerWatts;
+        activity.MaxPowerWatts = summary.MaxPowerWatts ?? activity.MaxPowerWatts;
+        activity.NormalizedPowerWatts = summary.NormalizedPowerWatts ?? activity.NormalizedPowerWatts;
+        activity.MinTemperatureCelsius = summary.MinTemperatureCelsius ?? activity.MinTemperatureCelsius;
+        activity.MaxTemperatureCelsius = summary.MaxTemperatureCelsius ?? activity.MaxTemperatureCelsius;
+        activity.AverageRespirationRate = summary.AverageRespirationRate ?? activity.AverageRespirationRate;
+        activity.MinRespirationRate = summary.MinRespirationRate ?? activity.MinRespirationRate;
+        activity.MaxRespirationRate = summary.MaxRespirationRate ?? activity.MaxRespirationRate;
+        activity.AverageSwolf = summary.AverageSwolf ?? activity.AverageSwolf;
+        activity.ActiveLengths = summary.ActiveLengths ?? activity.ActiveLengths;
+        activity.AerobicTrainingEffect = summary.AerobicTrainingEffect ?? activity.AerobicTrainingEffect;
+        activity.AnaerobicTrainingEffect = summary.AnaerobicTrainingEffect ?? activity.AnaerobicTrainingEffect;
+        activity.TrainingLoad = summary.TrainingLoad ?? activity.TrainingLoad;
+        activity.TrainingStressScore = summary.TrainingStressScore ?? activity.TrainingStressScore;
+        activity.IntensityFactor = summary.IntensityFactor ?? activity.IntensityFactor;
+        activity.Vo2Max = summary.Vo2Max ?? activity.Vo2Max;
+    }
+
+    private static ActivityLap ToEntity(Activity activity, GarminActivityLapData lap) => new()
+    {
+        Activity = activity,
+        ActivityId = activity.Id,
+        LapIndex = lap.LapIndex,
+        StartedAt = lap.StartedAt,
+        DurationSeconds = lap.DurationSeconds,
+        ElapsedDurationSeconds = lap.ElapsedDurationSeconds,
+        MovingDurationSeconds = lap.MovingDurationSeconds,
+        DistanceMeters = lap.DistanceMeters,
+        AverageSpeedMetersPerSecond = lap.AverageSpeedMetersPerSecond,
+        MaxSpeedMetersPerSecond = lap.MaxSpeedMetersPerSecond,
+        AveragePaceSecondsPerKilometer = lap.AveragePaceSecondsPerKilometer,
+        Calories = lap.Calories,
+        AverageHeartRate = lap.AverageHeartRate,
+        MaxHeartRate = lap.MaxHeartRate,
+        ElevationGainMeters = lap.ElevationGainMeters,
+        ElevationLossMeters = lap.ElevationLossMeters,
+        MinElevationMeters = lap.MinElevationMeters,
+        MaxElevationMeters = lap.MaxElevationMeters,
+        AverageCadence = lap.AverageCadence,
+        MaxCadence = lap.MaxCadence,
+        CadenceUnit = lap.CadenceUnit,
+        AverageTemperatureCelsius = lap.AverageTemperatureCelsius,
+        MinTemperatureCelsius = lap.MinTemperatureCelsius,
+        MaxTemperatureCelsius = lap.MaxTemperatureCelsius,
+        AverageRespirationRate = lap.AverageRespirationRate,
+        MaxRespirationRate = lap.MaxRespirationRate,
+        IntensityType = lap.IntensityType
+    };
+
+    private static ActivityHeartRateZone ToEntity(Activity activity, GarminHeartRateZoneData zone) => new()
+    {
+        Activity = activity,
+        ActivityId = activity.Id,
+        ZoneNumber = zone.ZoneNumber,
+        TimeSeconds = zone.TimeSeconds,
+        Percentage = zone.Percentage,
+        LowBoundaryBpm = zone.LowBoundaryBpm
+    };
 
     private async Task UpsertDailySegmentAsync(
         DateOnly date,

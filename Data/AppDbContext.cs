@@ -7,6 +7,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<DailyMetric> DailyMetrics => Set<DailyMetric>();
     public DbSet<Activity> Activities => Set<Activity>();
+    public DbSet<ActivityLap> ActivityLaps => Set<ActivityLap>();
+    public DbSet<ActivityHeartRateZone> ActivityHeartRateZones => Set<ActivityHeartRateZone>();
     public DbSet<RawProviderData> RawProviderData => Set<RawProviderData>();
     public DbSet<SyncState> SyncStates => Set<SyncState>();
     public DbSet<OAuthClient> OAuthClients => Set<OAuthClient>();
@@ -33,6 +35,31 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.ExternalId).HasMaxLength(200);
             entity.Property(x => x.Name).HasMaxLength(500);
             entity.Property(x => x.ActivityType).HasMaxLength(100);
+            entity.Property(x => x.CadenceUnit).HasMaxLength(30);
+            entity.HasMany(x => x.Laps)
+                .WithOne(x => x.Activity)
+                .HasForeignKey(x => x.ActivityId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(x => x.HeartRateZones)
+                .WithOne(x => x.Activity)
+                .HasForeignKey(x => x.ActivityId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ActivityLap>(entity =>
+        {
+            entity.ToTable("activity_laps");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ActivityId, x.LapIndex }).IsUnique();
+            entity.Property(x => x.CadenceUnit).HasMaxLength(30);
+            entity.Property(x => x.IntensityType).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<ActivityHeartRateZone>(entity =>
+        {
+            entity.ToTable("activity_heart_rate_zones");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ActivityId, x.ZoneNumber }).IsUnique();
         });
 
         modelBuilder.Entity<RawProviderData>(entity =>
