@@ -11,6 +11,8 @@ services:
       ASPNETCORE_HTTP_PORTS: "8080"
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=openhealthmcp;Username=openhealthmcp;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+      OAUTH_BASE_URL: ${OAUTH_BASE_URL:?OAUTH_BASE_URL is required}
+      OAUTH_OWNER_PASSWORD: ${OAUTH_OWNER_PASSWORD:?OAUTH_OWNER_PASSWORD is required}
       GARMIN_EMAIL: ${GARMIN_EMAIL:-}
       GARMIN_PASSWORD: ${GARMIN_PASSWORD:-}
       GARMIN_MFA_CODE: ${GARMIN_MFA_CODE:-}
