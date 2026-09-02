@@ -1,0 +1,60 @@
+name: openhealthmcp
+
+services:
+  openhealthmcp:
+    image: ${OPENHEALTHMCP_IMAGE:?OPENHEALTHMCP_IMAGE is required}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=openhealthmcp;Username=openhealthmcp;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+      GARMIN_EMAIL: ${GARMIN_EMAIL:-}
+      GARMIN_PASSWORD: ${GARMIN_PASSWORD:-}
+      GARMIN_MFA_CODE: ${GARMIN_MFA_CODE:-}
+      GARMIN_SESSION_PATH: /var/lib/openhealthmcp/garmin/token.json
+      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-3}
+      SYNC_LOOKBACK_DAYS: ${SYNC_LOOKBACK_DAYS:-3}
+    expose:
+      - "8080"
+    volumes:
+      - garmin_session:/var/lib/openhealthmcp/garmin
+    networks:
+      - internal
+      - proxy
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openhealthmcp
+      POSTGRES_USER: openhealthmcp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openhealthmcp -d openhealthmcp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+  garmin_session:
+
+networks:
+  internal:
+    internal: true
+  proxy:
+    external: true
+    name: proxy
