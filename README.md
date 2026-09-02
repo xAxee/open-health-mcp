@@ -107,14 +107,15 @@ touch /home/nexus-deploy/openhealthmcp/.env
 chmod 600 /home/nexus-deploy/openhealthmcp/.env
 ```
 
-Populate `/home/nexus-deploy/openhealthmcp/.env` from `deploy/.env.example`. Generate independent hexadecimal secrets so they are safe in both dotenv and PostgreSQL connection-string syntax:
+Generate three independent hexadecimal secrets so they are safe in dotenv and PostgreSQL connection-string syntax:
 
 ```bash
 openssl rand -hex 32
 openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-Use the first value for `POSTGRES_PASSWORD` and the second for `MCP_AUTH_TOKEN`. Add the Garmin credentials without committing or copying this file into CI. Keep its permissions at `600`.
+Use the values for `POSTGRES_PASSWORD`, `MCP_AUTH_TOKEN`, and `OAUTH_OWNER_PASSWORD`, respectively. Do not reuse one value for multiple purposes. Set `OAUTH_BASE_URL=https://health.hubertiwan.pl`. Add the Garmin credentials without committing or copying this file into CI. Keep its permissions at `600`.
 
 If the GHCR package is private, log in once as the deployment user with a fine-grained token that has read-only package access:
 
@@ -187,7 +188,9 @@ Never run a host-wide `docker compose down`, `docker system prune --volumes`, or
 |---|---:|---:|---|
 | `POSTGRES_PASSWORD` | Compose | none | Password used by the private PostgreSQL container. |
 | `ConnectionStrings__Postgres` | App | none | PostgreSQL connection string; Compose supplies it automatically. |
-| `MCP_AUTH_TOKEN` | yes | none | Bearer token for every endpoint except `GET /health`; minimum 32 characters. |
+| `MCP_AUTH_TOKEN` | yes | none | Static Bearer token for manual MCP clients and the admin synchronization endpoint; minimum 32 characters. |
+| `OAUTH_BASE_URL` | yes | none | Public HTTPS origin of the OAuth and MCP server, without a trailing slash or path. |
+| `OAUTH_OWNER_PASSWORD` | yes | none | Separate owner password used only on the OAuth consent page; minimum 32 characters. |
 | `GARMIN_EMAIL` | sync | empty | Garmin Connect account email. |
 | `GARMIN_PASSWORD` | sync | empty | Garmin Connect account password. |
 | `GARMIN_MFA_CODE` | conditional | empty | Current one-time code if Garmin requires MFA during authentication. Remove or replace it after use. |
@@ -199,13 +202,46 @@ Never commit `.env`. It is ignored by Git.
 
 ## Authentication
 
-All application endpoints except `GET /health` require:
+`GET /health` and OAuth discovery/authorization endpoints are public. The MCP endpoint accepts either an OAuth access token or the static installation token. Manual clients can use:
 
 ```http
 Authorization: Bearer <MCP_AUTH_TOKEN>
 ```
 
-Missing or invalid tokens return `401 Unauthorized`. The configured token, Garmin credentials, session tokens, and raw health payloads are not written to normal application logs.
+`POST /admin/sync` accepts only `MCP_AUTH_TOKEN`; an OAuth token issued to ChatGPT cannot invoke it. Missing or invalid credentials return `401 Unauthorized` or `403 Forbidden` as appropriate. Configured passwords, tokens, authorization codes, Garmin credentials, session tokens, and raw health payloads are not written to normal application logs. OAuth authorization codes and tokens are stored in PostgreSQL only as SHA-256 hashes.
+
+### OAuth for ChatGPT
+
+OpenHealthMCP implements OAuth 2.1 authorization code flow for public clients with:
+
+- OAuth Protected Resource Metadata (RFC 9728);
+- Authorization Server Metadata (RFC 8414);
+- Dynamic Client Registration (RFC 7591);
+- mandatory PKCE using `S256`;
+- exact redirect URI validation and MCP resource binding;
+- the single read-only scope `health.read`;
+- one-time authorization codes valid for 5 minutes;
+- access tokens valid for 1 hour;
+- rotating refresh tokens valid for 30 days.
+
+Metadata endpoints:
+
+```text
+https://health.hubertiwan.pl/.well-known/oauth-protected-resource/mcp
+https://health.hubertiwan.pl/.well-known/oauth-authorization-server
+```
+
+To connect from ChatGPT on an eligible web account:
+
+1. Open **Settings → Security and login** and enable **Developer mode**.
+2. Open `https://chatgpt.com/plugins`.
+3. Select the plus button to create a developer-mode app.
+4. Enter `OpenHealthMCP` as the name and `https://health.hubertiwan.pl/mcp` as the MCP server URL.
+5. Select OAuth authentication. Do not enter `MCP_AUTH_TOKEN` into ChatGPT.
+6. When redirected to OpenHealthMCP, verify the displayed client and callback URL, then enter `OAUTH_OWNER_PASSWORD` and approve access.
+7. After the app appears under **Drafts**, enable it from the conversation's **Developer mode** tool menu.
+
+Only authorize a client when the callback displayed by OpenHealthMCP belongs to ChatGPT. Revoke all existing ChatGPT grants by deleting rows from the OAuth token/client tables only when you intentionally want to disconnect every registered OAuth client.
 
 ## Garmin synchronization
 

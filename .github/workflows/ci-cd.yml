@@ -48,12 +48,13 @@ jobs:
           --file deploy/compose.production.yml
           config --quiet
 
-      - name: Validate deployment script
+      - name: Validate shell scripts
         run: >-
           docker run --rm
           --volume "${PWD}:/workspace:ro"
-          bash:5.2
-          bash -n /workspace/deploy/deploy.sh
+          koalaman/shellcheck:stable
+          /workspace/deploy/deploy.sh
+          /workspace/tests/oauth-flow.sh
 
       - name: Validate Caddy configuration
         run: >-
@@ -61,6 +62,21 @@ jobs:
           --volume "${PWD}/deploy/Caddyfile.health:/etc/caddy/Caddyfile:ro"
           caddy:2-alpine
           caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Run OAuth integration flow
+        shell: bash
+        env:
+          BASE_URL: http://localhost:18080
+          OAUTH_RESOURCE: https://health.hubertiwan.pl/mcp
+          OAUTH_OWNER_PASSWORD: test-only-owner-password-never-use-in-production
+          MCP_AUTH_TOKEN: test-only-static-token-never-use-in-production
+        run: |
+          trap 'docker compose --file tests/compose.oauth.yml down --volumes --remove-orphans' EXIT
+          docker compose --file tests/compose.oauth.yml up --detach --build
+          if ! bash tests/oauth-flow.sh; then
+            docker compose --file tests/compose.oauth.yml logs --no-color --tail 200
+            exit 1
+          fi
 
       - name: Validate Docker image build
         run: docker build --tag openhealthmcp-ci:${{ github.sha }} .

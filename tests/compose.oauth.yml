@@ -1,0 +1,45 @@
+name: openhealthmcp-oauth-test
+
+services:
+  openhealthmcp:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=openhealthmcp;Username=openhealthmcp;Password=oauth-test-postgres-password
+      MCP_AUTH_TOKEN: test-only-static-token-never-use-in-production
+      OAUTH_BASE_URL: https://health.hubertiwan.pl
+      OAUTH_OWNER_PASSWORD: test-only-owner-password-never-use-in-production
+      GARMIN_EMAIL: ""
+      GARMIN_PASSWORD: ""
+      GARMIN_MFA_CODE: ""
+      GARMIN_SESSION_PATH: /var/lib/openhealthmcp/garmin/token.json
+      SYNC_INTERVAL_HOURS: "168"
+      SYNC_LOOKBACK_DAYS: "1"
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks:
+      - oauth-test
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: openhealthmcp
+      POSTGRES_USER: openhealthmcp
+      POSTGRES_PASSWORD: oauth-test-postgres-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openhealthmcp -d openhealthmcp"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 2s
+    networks:
+      - oauth-test
+
+networks:
+  oauth-test:
