@@ -49,8 +49,8 @@ public sealed class HealthTools
     }
 
     [McpServerTool(Name = "get_activities", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
-    [Description("Returns normalized activities in a date range, ordered newest first.")]
-    public static async Task<IReadOnlyList<ActivityResult>> GetActivitiesAsync(
+    [Description("Returns lightweight normalized activity summaries in a date range, ordered newest first. Use get_activity and the activity detail tools for richer data.")]
+    public static async Task<IReadOnlyList<ActivityListResult>> GetActivitiesAsync(
         [Description("Inclusive start date in YYYY-MM-DD format.")] string from,
         [Description("Inclusive end date in YYYY-MM-DD format.")] string to,
         IDbContextFactory<AppDbContext> dbContextFactory,
@@ -81,12 +81,12 @@ public sealed class HealthTools
         return await query
             .OrderByDescending(item => item.StartedAt)
             .Take(effectiveLimit)
-            .Select(ToActivityResult())
+            .Select(ToActivityListResult())
             .ToListAsync(cancellationToken);
     }
 
     [McpServerTool(Name = "get_activity", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
-    [Description("Returns one normalized activity by provider activity identifier.")]
+    [Description("Returns one normalized activity with available timing, speed, pace, cadence, power, temperature, respiration and Garmin-provided training effect/load values. Missing provider values are null. Use get_activity_laps and get_activity_hr_zones for collections.")]
     public static async Task<ActivityLookupResult> GetActivityAsync(
         [Description("Provider activity identifier.")] string activityId,
         IDbContextFactory<AppDbContext> dbContextFactory,
@@ -107,6 +107,109 @@ public sealed class HealthTools
             .FirstOrDefaultAsync(cancellationToken);
 
         return new ActivityLookupResult(result is not null, result);
+    }
+
+    [McpServerTool(Name = "get_activity_laps", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
+    [Description("Returns normalized Garmin-provided laps/splits for one stored activity. An empty list with synchronized=true means the provider returned no laps; synchronized=false means enrichment has not completed.")]
+    public static async Task<ActivityLapsResult> GetActivityLapsAsync(
+        [Description("Provider activity ID returned by get_activities.")] string activityId,
+        IDbContextFactory<AppDbContext> dbContextFactory,
+        CancellationToken cancellationToken,
+        [Description("Optional provider source. Defaults to garmin.")] string? source = null)
+    {
+        ValidateActivityId(activityId);
+        activityId = activityId.Trim();
+        var normalizedSource = NormalizeSource(source);
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var activity = await dbContext.Activities
+            .AsNoTracking()
+            .Where(item => item.Source == normalizedSource && item.ExternalId == activityId)
+            .Select(item => new { item.Id, item.LapsSyncedAt })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (activity is null)
+        {
+            return new ActivityLapsResult(false, normalizedSource, activityId, false, []);
+        }
+
+        var laps = await dbContext.ActivityLaps
+            .AsNoTracking()
+            .Where(item => item.ActivityId == activity.Id)
+            .OrderBy(item => item.LapIndex)
+            .Select(item => new ActivityLapResult(
+                item.LapIndex,
+                item.StartedAt,
+                item.DurationSeconds,
+                item.ElapsedDurationSeconds,
+                item.MovingDurationSeconds,
+                item.DistanceMeters,
+                item.AverageSpeedMetersPerSecond,
+                item.MaxSpeedMetersPerSecond,
+                item.AveragePaceSecondsPerKilometer,
+                item.Calories,
+                item.AverageHeartRate,
+                item.MaxHeartRate,
+                item.ElevationGainMeters,
+                item.ElevationLossMeters,
+                item.MinElevationMeters,
+                item.MaxElevationMeters,
+                item.AverageCadence,
+                item.MaxCadence,
+                item.CadenceUnit,
+                item.AverageTemperatureCelsius,
+                item.MinTemperatureCelsius,
+                item.MaxTemperatureCelsius,
+                item.AverageRespirationRate,
+                item.MaxRespirationRate,
+                item.IntensityType))
+            .ToListAsync(cancellationToken);
+
+        return new ActivityLapsResult(
+            true,
+            normalizedSource,
+            activityId,
+            activity.LapsSyncedAt.HasValue,
+            laps);
+    }
+
+    [McpServerTool(Name = "get_activity_hr_zones", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
+    [Description("Returns Garmin-provided time in heart-rate zones for one stored activity. Percentages are normalized from Garmin secsInZone values; zone boundaries are not inferred.")]
+    public static async Task<ActivityHeartRateZonesResult> GetActivityHeartRateZonesAsync(
+        [Description("Provider activity ID returned by get_activities.")] string activityId,
+        IDbContextFactory<AppDbContext> dbContextFactory,
+        CancellationToken cancellationToken,
+        [Description("Optional provider source. Defaults to garmin.")] string? source = null)
+    {
+        ValidateActivityId(activityId);
+        activityId = activityId.Trim();
+        var normalizedSource = NormalizeSource(source);
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var activity = await dbContext.Activities
+            .AsNoTracking()
+            .Where(item => item.Source == normalizedSource && item.ExternalId == activityId)
+            .Select(item => new { item.Id, item.HeartRateZonesSyncedAt })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (activity is null)
+        {
+            return new ActivityHeartRateZonesResult(false, normalizedSource, activityId, false, []);
+        }
+
+        var zones = await dbContext.ActivityHeartRateZones
+            .AsNoTracking()
+            .Where(item => item.ActivityId == activity.Id)
+            .OrderBy(item => item.ZoneNumber)
+            .Select(item => new ActivityHeartRateZoneResult(
+                item.ZoneNumber,
+                item.TimeSeconds,
+                item.Percentage,
+                item.LowBoundaryBpm))
+            .ToListAsync(cancellationToken);
+
+        return new ActivityHeartRateZonesResult(
+            true,
+            normalizedSource,
+            activityId,
+            activity.HeartRateZonesSyncedAt.HasValue,
+            zones);
     }
 
     [McpServerTool(Name = "get_trend", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
@@ -237,8 +340,8 @@ public sealed class HealthTools
         _ => double.NaN
     };
 
-    private static System.Linq.Expressions.Expression<Func<Activity, ActivityResult>> ToActivityResult() =>
-        item => new ActivityResult(
+    private static System.Linq.Expressions.Expression<Func<Activity, ActivityListResult>> ToActivityListResult() =>
+        item => new ActivityListResult(
             item.Source,
             item.ExternalId,
             item.Name,
@@ -250,6 +353,56 @@ public sealed class HealthTools
             item.AverageHeartRate,
             item.MaxHeartRate,
             item.ElevationGainMeters);
+
+    private static System.Linq.Expressions.Expression<Func<Activity, ActivityResult>> ToActivityResult() =>
+        item => new ActivityResult(
+            item.Source,
+            item.ExternalId,
+            item.Name,
+            item.ActivityType,
+            item.StartedAt,
+            item.DurationSeconds,
+            item.ElapsedDurationSeconds,
+            item.MovingDurationSeconds,
+            item.DistanceMeters,
+            item.Calories,
+            item.AverageHeartRate,
+            item.MaxHeartRate,
+            item.ElevationGainMeters,
+            item.ElevationLossMeters,
+            item.AverageSpeedMetersPerSecond,
+            item.MaxSpeedMetersPerSecond,
+            item.AveragePaceSecondsPerKilometer,
+            item.Steps,
+            item.AverageCadence,
+            item.MaxCadence,
+            item.CadenceUnit,
+            item.AveragePowerWatts,
+            item.MaxPowerWatts,
+            item.NormalizedPowerWatts,
+            item.MinTemperatureCelsius,
+            item.MaxTemperatureCelsius,
+            item.AverageRespirationRate,
+            item.MinRespirationRate,
+            item.MaxRespirationRate,
+            item.AverageSwolf,
+            item.ActiveLengths,
+            item.AerobicTrainingEffect,
+            item.AnaerobicTrainingEffect,
+            item.TrainingLoad,
+            item.TrainingStressScore,
+            item.IntensityFactor,
+            item.Vo2Max,
+            item.LapsSyncedAt != null,
+            item.HeartRateZonesSyncedAt != null);
+
+    private static void ValidateActivityId(string activityId)
+    {
+        if (string.IsNullOrWhiteSpace(activityId) || activityId.Length > 200)
+        {
+            throw new ArgumentException("activityId is required and cannot exceed 200 characters.", nameof(activityId));
+        }
+    }
 
     private static DateOnly ParseDate(string value, string parameterName) =>
         DateOnly.TryParseExact(

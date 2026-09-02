@@ -10,12 +10,12 @@ OpenHealthMCP does not contain or call an LLM. It is designed for exactly one se
 ## Features
 
 - Garmin daily health synchronization: steps, heart rate, HRV, stress, Body Battery, sleep score, and calories when supplied by Garmin.
-- Garmin activity synchronization with normalized metadata.
+- Garmin activity synchronization with normalized timing, speed/pace, elevation, cadence, power, temperature, respiration, training effect/load, laps, and activity heart-rate zones when supplied by Garmin.
 - PostgreSQL 17 history with idempotent updates and uniqueness constraints.
 - Original Garmin JSON response records preserved as PostgreSQL `jsonb`.
 - Automatic refresh of recent days with a configurable interval and lookback.
 - Authenticated historical backfill processed in bounded chunks.
-- Remote Streamable HTTP MCP server with five provider-neutral, read-only tools.
+- Remote Streamable HTTP MCP server with seven provider-neutral, read-only tools.
 - Constant-time Bearer token authentication.
 - Automatic EF Core migrations with startup retry.
 - Docker Compose deployment with private PostgreSQL networking and persistent volumes.
@@ -195,6 +195,8 @@ Never run a host-wide `docker compose down`, `docker system prune --volumes`, or
 | `GARMIN_PASSWORD` | sync | empty | Garmin Connect account password. |
 | `GARMIN_MFA_CODE` | conditional | empty | Current one-time code if Garmin requires MFA during authentication. Remove or replace it after use. |
 | `GARMIN_SESSION_PATH` | no | `garmin-session/token.json` | Persistent OAuth2 token cache path. Compose uses a dedicated volume. |
+| `GARMIN_ACTIVITY_ENRICHMENT_LIMIT` | no | `10` | Maximum activities enriched with optional laps and HR-zone requests per 31-day sync chunk; 0 disables enrichment, maximum 100. |
+| `GARMIN_ACTIVITY_ENRICHMENT_DELAY_MS` | no | `250` | Delay in milliseconds between optional Garmin activity enrichment requests; 0–10000. |
 | `SYNC_INTERVAL_HOURS` | no | `3` | Scheduled synchronization interval; greater than 0 and at most 168. |
 | `SYNC_LOOKBACK_DAYS` | no | `3` | Recent period refreshed by every scheduled run, including today; 1–31. |
 
@@ -255,7 +257,13 @@ Repeated synchronization is idempotent:
 
 - daily metrics are unique by `(Source, Date)`;
 - activities are unique by `(Source, ExternalId)`;
+- activity laps are unique by `(ActivityId, LapIndex)`;
+- activity heart-rate zones are unique by `(ActivityId, ZoneNumber)`;
 - raw payloads are unique by `(Source, DataType, ExternalId)`.
+
+Activity summary fields are read from Garmin's paginated activity list response. This includes duration, elapsed and moving time, distance, elevation gain/loss, speed, steps, sport-specific cadence, power, temperature range, respiration, SWOLF/lengths, aerobic and anaerobic Training Effect, activity training load, Training Stress Score, Intensity Factor, and activity VO2 max when the individual fields are present. Average pace in seconds per kilometer is a unit conversion from Garmin's average speed; it is not a training interpretation.
+
+Laps and activity heart-rate-zone time require optional Garmin requests to the confirmed `/splits` and `/hrTimeInZones` activity endpoints. They are fetched sequentially only for activities that have not yet been enriched, up to `GARMIN_ACTIVITY_ENRICHMENT_LIMIT` per 31-day chunk, with a configurable delay between requests. Re-run the same historical range to enrich any activities left beyond the limit. Recent activities can be refreshed at most once per 24 hours for seven days, allowing Garmin's delayed processing to complete. A failed optional request remains pending and can be retried by a later synchronization. Raw list, split, and HR-zone responses are retained as `jsonb`.
 
 ### Historical synchronization
 
@@ -296,8 +304,10 @@ Available tools:
 | Tool | Purpose |
 |---|---|
 | `get_day` | Return normalized metrics for one date. |
-| `get_activities` | Return activities in a date range, with optional type and bounded limit. |
-| `get_activity` | Return one normalized activity by provider activity ID. |
+| `get_activities` | Return lightweight activity summaries in a date range, with optional type and bounded limit. |
+| `get_activity` | Return one normalized activity with all available scalar activity and training-effect metrics. |
+| `get_activity_laps` | Return normalized provider laps/splits for one stored activity. |
+| `get_activity_hr_zones` | Return provider time in heart-rate zones for one stored activity. |
 | `get_trend` | Return deterministic statistics and daily samples for a supported metric. |
 | `compare_periods` | Compare averages, absolute difference, percentage change, and sample counts. |
 
@@ -313,6 +323,8 @@ sleep_score
 ```
 
 MCP tools query PostgreSQL only. They do not contact Garmin, modify health data, expose raw provider payloads, or provide medical diagnoses.
+
+`get_activity_laps` and `get_activity_hr_zones` return `found`, `source`, `activityId`, `synchronized`, and an ordered collection. `synchronized=false` means the optional Garmin enrichment has not completed. `synchronized=true` with an empty collection means no entries were returned or expected. HR-zone percentages are calculated only from Garmin's `secsInZone` values, using their sum as the denominator; zone boundaries are returned only when Garmin provides `zoneLowBoundary` and are never inferred.
 
 ## Security
 
@@ -333,6 +345,8 @@ Bearer tokens over plain HTTP can be intercepted. The built-in HTTP listener is 
 - Integration uses the maintained but unofficial `Unofficial.Garmin.Connect` package and undocumented Garmin behavior.
 - Garmin can change authentication or response formats without notice.
 - Real-account authentication, MFA, and payload compatibility must be verified with your own account and device data.
+- The package exposes Garmin's activity list, `/splits`, and `/hrTimeInZones` models used here. It does not expose a stable, provider-independent meaning for Garmin-specific Training Effect labels/messages, so OpenHealthMCP stores only confirmed numeric values.
+- Availability varies by activity type, device, sensors, and Garmin processing. In particular, power, temperature, respiration, cadence, Training Effect/load, laps, and HR zones can legitimately be absent.
 - Missing optional values remain `null`; OpenHealthMCP does not fabricate provider measurements or payloads.
 - If credentials are absent or authentication fails, synchronization records and returns an actionable failure while the database, health endpoint, and historical MCP reads remain available.
 
