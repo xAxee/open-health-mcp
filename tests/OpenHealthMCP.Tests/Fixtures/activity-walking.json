@@ -1,0 +1,14 @@
+{
+  "activityId": 900000002,
+  "activityName": "Sanitized walk",
+  "activityType": { "typeKey": "walking" },
+  "startTimeGMT": "2026-08-28 16:20:00",
+  "duration": 2700,
+  "elapsedDuration": 2820,
+  "movingDuration": 2600,
+  "distance": 3850,
+  "averageHR": 96,
+  "maxHR": 121,
+  "steps": 5020,
+  "averageRunningCadenceInStepsPerMinute": 112
+}

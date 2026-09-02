@@ -14,7 +14,8 @@
 
 ## Provider limitations pending confirmation
 
-- FIT download, naps, profile VO2max/fitness age/max HR/configured zones, body composition, and blood pressure require confirmed Garmin requests and payload fixtures.
+- The NuGet 0.10.0 source confirms methods for FIT, profile/settings, fitness age, configured HR zones, body composition, and blood pressure. Real-account payload compatibility and fixtures still require validation.
+- HRV measured series and naps still lack a confirmed response shape in the currently used methods.
 
 ## Environment
 

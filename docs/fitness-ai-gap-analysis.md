@@ -42,7 +42,7 @@ This is the correct direction and must be retained. The current implementation i
 | Laps | `GetActivitySplits` | `/activity-service/activity/{id}/splits` | `activity_splits` |
 | HR zones | `GetActivityHrInTimezones` | `/activity-service/activity/{id}/hrTimeInZones` | activity HR-zone raw record |
 
-No FIT download, body-composition, blood-pressure, fitness-age, configured-HR-zone, or profile endpoint has yet been confirmed by this repository. Such data remains `TODO` or `PROVIDER_NOT_AVAILABLE` until a real response is captured and covered by a sanitized fixture.
+Source inspection at the exact NuGet 0.10.0 commit (`e8e811c`) confirms client methods for FIT download, body composition/weight, blood pressure, fitness age, configured HR zones, user settings, SpO2, respiration, and a dedicated Body Battery report. Their implementation status remains `MISSING` until OpenHealth captures a real response, stores it raw, and normalizes it with sanitized fixture coverage.
 
 ## Daily wellness
 
@@ -150,7 +150,7 @@ No FIT download, body-composition, blood-pressure, fitness-age, configured-HR-zo
 | HR-zone number/time/percentage/low boundary | `AVAILABLE` | Garmin `/hrTimeInZones` | Keep Garmin values authoritative. Percentage is derived from Garmin durations and must be marked derived. |
 | HR-zone high boundary | `MISSING` | Not inferred | May derive from next Garmin low boundary only with explicit `derived` metadata. Never use age formulas. |
 | HR drift | `MISSING` | Not implemented | Add deterministic `hr-drift-v1` only for suitable activities with sufficient measured streams. |
-| FIT | `PROVIDER_NOT_AVAILABLE` | No confirmed client method/request in this revision | Reclassify after real FIT request capture, fixture, and parser evaluation. |
+| FIT | `MISSING` | Confirmed library path `/download-service/files/activity/{id}` | Implement binary capture/storage and parser only after validating a real download. |
 
 ## Profile and sparse measurements
 
@@ -158,11 +158,11 @@ No FIT download, body-composition, blood-pressure, fitness-age, configured-HR-zo
 | --- | --- | --- | --- |
 | Provider connection status | `PARTIAL` | Configuration and one provider-level sync state exist | Expose safe capabilities and status through MCP. |
 | Timezone | `MISSING` | Not persisted | Required before correct daily/date semantics. |
-| Garmin profile identifier | `TODO` | No confirmed profile response | Store only a safe identifier. |
-| Running/cycling VO2max | `MISSING` | Only activity VO2max exists | Confirm profile source; never infer. |
-| Fitness age/max HR/configured zones | `PROVIDER_NOT_AVAILABLE` | No confirmed source in current code | Do not guess. |
-| Body composition | `MISSING` | No model/source/tool | Confirm provider response; persist sparse measurements without interpolation. |
-| Blood pressure | `MISSING` | No model/source/tool | Confirm provider response; persist sparse measurements without fabricated daily averages. |
+| Garmin profile identifier | `MISSING` | Confirmed `/userprofile-service/socialProfile` | Store only a safe identifier, not names/email. |
+| Running/cycling VO2max | `MISSING` | Confirmed user-settings fields | Persist provider values; never infer. |
+| Fitness age/max HR/configured zones | `MISSING` | Confirmed fitness-age and biometric HR-zone methods | Preserve Garmin values and sport/training method. |
+| Body composition | `MISSING` | Confirmed body-composition and weight-range methods | Persist sparse measurements without interpolation. |
+| Blood pressure | `MISSING` | Confirmed daily/range methods | Persist sparse measurements without fabricated daily averages. |
 
 ## Trends, comparison, synchronization, and quality
 
@@ -226,7 +226,7 @@ Backward-compatible additions planned:
 ## Non-negotiable source rules
 
 - Garmin fields are reported as `garmin_api`/`garmin_connect` only when present in a confirmed response.
-- FIT fields are reported as `garmin_fit` only when parsed from a preserved FIT source.
+- FIT fields are reported as `garmin_fit` only when parsed from a validated and preserved FIT download.
 - Percentages, inferred adjacent-zone boundaries, pace, HRV extrema from samples, and HR drift are `derived_by_openhealth` with an algorithm identifier.
 - Missing samples are never interpolated into measurements.
 - Garmin HR-zone boundaries always take precedence over any derived representation; age-based zones are prohibited.
