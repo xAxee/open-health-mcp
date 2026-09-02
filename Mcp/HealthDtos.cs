@@ -13,7 +13,17 @@ public sealed record DayResult(
     int? BodyBatteryMin,
     int? BodyBatteryMax,
     double? SleepScore,
-    int? Calories);
+    int? Calories,
+    int? ActiveCalories,
+    int? ModerateIntensityMinutes,
+    int? VigorousIntensityMinutes,
+    int? SleepDurationSeconds,
+    int? DeepSleepSeconds,
+    int? LightSleepSeconds,
+    int? RemSleepSeconds,
+    int? AwakeSleepSeconds,
+    double? AverageRespirationRate,
+    double? AverageSpo2);
 
 public sealed record DayLookupResult(bool Found, DayResult? Data);
 
@@ -69,7 +79,8 @@ public sealed record ActivityResult(
     double? IntensityFactor,
     double? Vo2Max,
     bool LapsSynchronized,
-    bool HeartRateZonesSynchronized);
+    bool HeartRateZonesSynchronized,
+    bool StreamsSynchronized);
 
 public sealed record ActivityLookupResult(bool Found, ActivityResult? Data);
 
@@ -119,6 +130,67 @@ public sealed record ActivityHeartRateZonesResult(
     string ActivityId,
     bool Synchronized,
     IReadOnlyList<ActivityHeartRateZoneResult> Zones);
+
+public sealed record ActivityStreamPoint(
+    DateTimeOffset? Timestamp,
+    double? ElapsedTimeSeconds,
+    IReadOnlyDictionary<string, double> Values);
+
+public sealed record ActivityStreamsResult(
+    bool Found,
+    string Source,
+    string ActivityId,
+    bool Synchronized,
+    int TotalSampleCount,
+    int ReturnedSampleCount,
+    IReadOnlyList<string> AvailableMetrics,
+    IReadOnlyList<string> SelectedMetrics,
+    IReadOnlyList<ActivityStreamPoint> Samples);
+
+public sealed record DailyTimelinePoint(DateTimeOffset Timestamp, double Value);
+
+public sealed record DailyTimelineResult(
+    string Source,
+    DateOnly Date,
+    string Metric,
+    bool Synchronized,
+    int TotalSampleCount,
+    int ReturnedSampleCount,
+    IReadOnlyList<DailyTimelinePoint> Samples);
+
+public sealed record ActivitySummaryHeartRateZone(
+    int ZoneNumber,
+    double TimeSeconds);
+
+public sealed record ActivitySummaryValues(
+    int ActivityCount,
+    double? DurationSeconds,
+    double? MovingDurationSeconds,
+    double? DistanceMeters,
+    double? ElevationGainMeters,
+    double? ElevationLossMeters,
+    int? Calories,
+    int? Steps,
+    double? AverageHeartRate,
+    IReadOnlyList<ActivitySummaryHeartRateZone> HeartRateZones);
+
+public sealed record ActivityTypeSummary(string ActivityType, ActivitySummaryValues Values);
+
+public sealed record ActivitySummaryGroup(
+    DateOnly From,
+    DateOnly To,
+    ActivitySummaryValues Values,
+    IReadOnlyList<ActivityTypeSummary> ByActivityType);
+
+public sealed record ActivitySummaryResult(
+    string Source,
+    DateOnly From,
+    DateOnly To,
+    string? ActivityType,
+    string GroupBy,
+    ActivitySummaryValues Total,
+    IReadOnlyList<ActivityTypeSummary> ByActivityType,
+    IReadOnlyList<ActivitySummaryGroup> Groups);
 
 public sealed record TrendValue(DateOnly Date, double Value);
 

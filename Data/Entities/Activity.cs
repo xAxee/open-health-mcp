@@ -42,9 +42,11 @@ public sealed class Activity
     public double? Vo2Max { get; set; }
     public DateTimeOffset? LapsSyncedAt { get; set; }
     public DateTimeOffset? HeartRateZonesSyncedAt { get; set; }
+    public DateTimeOffset? StreamsSyncedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
     public ICollection<ActivityLap> Laps { get; set; } = [];
     public ICollection<ActivityHeartRateZone> HeartRateZones { get; set; } = [];
+    public ActivityStream? Stream { get; set; }
 }

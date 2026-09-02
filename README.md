@@ -9,13 +9,13 @@ OpenHealthMCP does not contain or call an LLM. It is designed for exactly one se
 
 ## Features
 
-- Garmin daily health synchronization: steps, heart rate, HRV, stress, Body Battery, sleep score, and calories when supplied by Garmin.
-- Garmin activity synchronization with normalized timing, speed/pace, elevation, cadence, power, temperature, respiration, training effect/load, laps, and activity heart-rate zones when supplied by Garmin.
+- Garmin daily health synchronization: steps, heart rate, HRV, stress, Body Battery, sleep and its phases, calories, intensity minutes, respiration, and SpO2 when supplied by Garmin.
+- Garmin activity synchronization with normalized timing, speed/pace, elevation, cadence, power, temperature, respiration, training effect/load, laps, heart-rate zones, and bounded time-series streams when supplied by Garmin.
 - PostgreSQL 17 history with idempotent updates and uniqueness constraints.
 - Original Garmin JSON response records preserved as PostgreSQL `jsonb`.
 - Automatic refresh of recent days with a configurable interval and lookback.
 - Authenticated historical backfill processed in bounded chunks.
-- Remote Streamable HTTP MCP server with seven provider-neutral, read-only tools.
+- Remote Streamable HTTP MCP server with ten provider-neutral, read-only tools.
 - Constant-time Bearer token authentication.
 - Automatic EF Core migrations with startup retry.
 - Docker Compose deployment with private PostgreSQL networking and persistent volumes.
@@ -251,7 +251,7 @@ Only authorize a client when the callback displayed by OpenHealthMCP belongs to 
 
 The background service runs once after startup and then every `SYNC_INTERVAL_HOURS`. By default, each run refreshes today and the previous two calendar days (`SYNC_LOOKBACK_DAYS=3`) because Garmin values can change after a device sync.
 
-Daily summary, heart rate, sleep, HRV, and activity units are persisted independently. A failure in one unit does not roll back previously committed data. A failed scheduled run is recorded in `SyncState` and does not stop the application host.
+Daily summary, heart rate, daily timeline, sleep, HRV, and activity units are persisted independently. A failure in one unit does not roll back previously committed data. A failed scheduled run is recorded in `SyncState` and does not stop the application host.
 
 Repeated synchronization is idempotent:
 
@@ -259,11 +259,15 @@ Repeated synchronization is idempotent:
 - activities are unique by `(Source, ExternalId)`;
 - activity laps are unique by `(ActivityId, LapIndex)`;
 - activity heart-rate zones are unique by `(ActivityId, ZoneNumber)`;
+- activity streams are unique by `ActivityId`;
+- daily timelines are unique by `(Source, Date, Metric)`;
 - raw payloads are unique by `(Source, DataType, ExternalId)`.
 
 Activity summary fields are read from Garmin's paginated activity list response. This includes duration, elapsed and moving time, distance, elevation gain/loss, speed, steps, sport-specific cadence, power, temperature range, respiration, SWOLF/lengths, aerobic and anaerobic Training Effect, activity training load, Training Stress Score, Intensity Factor, and activity VO2 max when the individual fields are present. Average pace in seconds per kilometer is a unit conversion from Garmin's average speed; it is not a training interpretation.
 
-Laps and activity heart-rate-zone time require optional Garmin requests to the confirmed `/splits` and `/hrTimeInZones` activity endpoints. They are fetched sequentially only for activities that have not yet been enriched, up to `GARMIN_ACTIVITY_ENRICHMENT_LIMIT` per 31-day chunk, with a configurable delay between requests. Re-run the same historical range to enrich any activities left beyond the limit. Recent activities can be refreshed at most once per 24 hours for seven days, allowing Garmin's delayed processing to complete. A failed optional request remains pending and can be retried by a later synchronization. Raw list, split, and HR-zone responses are retained as `jsonb`.
+Laps, activity heart-rate-zone time, and streams require optional Garmin requests to the confirmed `/splits`, `/hrTimeInZones`, and `/details` activity endpoints. They are fetched sequentially only for activities that have not yet been enriched, up to `GARMIN_ACTIVITY_ENRICHMENT_LIMIT` per 31-day chunk, with a configurable delay between requests. Re-run the same historical range to enrich any activities left beyond the limit. Recent activities can be refreshed at most once per 24 hours for seven days, allowing Garmin's delayed processing to complete. Activity streams are requested with `maxChartSize=2000`, omit the polyline, and are backfilled only for activities from the last 365 days. A failed optional request remains pending and can be retried by a later synchronization. Raw list, split, HR-zone, and details responses are retained as `jsonb`.
+
+Daily heart-rate samples are normalized from the existing daily heart-rate response without another Garmin request. Stress and Body Battery timelines use one `/wellness-service/wellness/dailyStress/` request per synchronized date. Normalized daily timelines use a rolling 365-day retention window: older historical sync dates keep their scalar daily metrics and existing raw payloads but do not trigger `dailyStress` requests or retain dense normalized samples. Each retained series is stored as one compact `jsonb` document rather than one database row per sample. This keeps idempotent updates and reads inexpensive while preserving the original provider response separately.
 
 ### Historical synchronization
 
@@ -308,6 +312,9 @@ Available tools:
 | `get_activity` | Return one normalized activity with all available scalar activity and training-effect metrics. |
 | `get_activity_laps` | Return normalized provider laps/splits for one stored activity. |
 | `get_activity_hr_zones` | Return provider time in heart-rate zones for one stored activity. |
+| `get_activity_streams` | Return selected, bounded activity stream metrics with elapsed time. |
+| `get_daily_timeline` | Return bounded heart-rate, stress, or Body Battery samples for one day. |
+| `get_activity_summary` | Return activity totals with optional type filter and daily, weekly, or monthly groups. |
 | `get_trend` | Return deterministic statistics and daily samples for a supported metric. |
 | `compare_periods` | Compare averages, absolute difference, percentage change, and sample counts. |
 
@@ -316,15 +323,46 @@ Supported trend metrics:
 ```text
 steps
 resting_heart_rate
+average_heart_rate
+min_heart_rate
+max_heart_rate
 hrv
 stress
+body_battery_min
 body_battery_max
 sleep_score
+calories
+active_calories
+moderate_intensity_minutes
+vigorous_intensity_minutes
+intensity_minutes
+sleep_duration_seconds
+deep_sleep_seconds
+light_sleep_seconds
+rem_sleep_seconds
+awake_sleep_seconds
+average_respiration_rate
+average_spo2
+activity_count
+activity_duration_seconds
+activity_moving_duration_seconds
+activity_distance_meters
+activity_elevation_gain_meters
+activity_elevation_loss_meters
+activity_calories
+activity_steps
+activity_average_heart_rate
+activity_training_load
+activity_aerobic_training_effect
+activity_anaerobic_training_effect
+activity_vo2_max
 ```
 
 MCP tools query PostgreSQL only. They do not contact Garmin, modify health data, expose raw provider payloads, or provide medical diagnoses.
 
 `get_activity_laps` and `get_activity_hr_zones` return `found`, `source`, `activityId`, `synchronized`, and an ordered collection. `synchronized=false` means the optional Garmin enrichment has not completed. `synchronized=true` with an empty collection means no entries were returned or expected. HR-zone percentages are calculated only from Garmin's `secsInZone` values, using their sum as the denominator; zone boundaries are returned only when Garmin provides `zoneLowBoundary` and are never inferred.
+
+`get_activity_streams` accepts a comma-separated metric selection, elapsed-time bounds, and `maxPoints` from 2 through 2000 (default 500). `get_daily_timeline` uses the same point limits. When a stored series exceeds the limit, deterministic evenly spaced downsampling retains its first and last points. `get_activity_summary` supports `none`, `daily`, `weekly`, and `monthly` grouping, rejects requests that would span more than 400 result periods, keeps sums `null` when no activity supplied the metric, and duration-weights average heart rate.
 
 ## Security
 
@@ -345,7 +383,7 @@ Bearer tokens over plain HTTP can be intercepted. The built-in HTTP listener is 
 - Integration uses the maintained but unofficial `Unofficial.Garmin.Connect` package and undocumented Garmin behavior.
 - Garmin can change authentication or response formats without notice.
 - Real-account authentication, MFA, and payload compatibility must be verified with your own account and device data.
-- The package exposes Garmin's activity list, `/splits`, and `/hrTimeInZones` models used here. It does not expose a stable, provider-independent meaning for Garmin-specific Training Effect labels/messages, so OpenHealthMCP stores only confirmed numeric values.
+- The package exposes Garmin's activity list, `/splits`, `/hrTimeInZones`, `/details`, and `/dailyStress` models used here. It does not expose a stable, provider-independent meaning for Garmin-specific Training Effect labels/messages, so OpenHealthMCP stores only confirmed numeric values.
 - Availability varies by activity type, device, sensors, and Garmin processing. In particular, power, temperature, respiration, cadence, Training Effect/load, laps, and HR zones can legitimately be absent.
 - Missing optional values remain `null`; OpenHealthMCP does not fabricate provider measurements or payloads.
 - If credentials are absent or authentication fails, synchronization records and returns an actionable failure while the database, health endpoint, and historical MCP reads remain available.

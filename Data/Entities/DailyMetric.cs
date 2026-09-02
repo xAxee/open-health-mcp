@@ -16,6 +16,16 @@ public sealed class DailyMetric
     public int? BodyBatteryMax { get; set; }
     public double? SleepScore { get; set; }
     public int? Calories { get; set; }
+    public int? ActiveCalories { get; set; }
+    public int? ModerateIntensityMinutes { get; set; }
+    public int? VigorousIntensityMinutes { get; set; }
+    public int? SleepDurationSeconds { get; set; }
+    public int? DeepSleepSeconds { get; set; }
+    public int? LightSleepSeconds { get; set; }
+    public int? RemSleepSeconds { get; set; }
+    public int? AwakeSleepSeconds { get; set; }
+    public double? AverageRespirationRate { get; set; }
+    public double? AverageSpo2 { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
