@@ -16,12 +16,18 @@ public sealed class GarminTimeSeriesPayloadParserTests
         var samples = parsed.Samples.RootElement.EnumerateArray().ToArray();
 
         Assert.Equal(3, parsed.SampleCount);
+        Assert.Equal(3, parsed.Points.Count);
         Assert.Contains("heartRateBpm", parsed.AvailableMetrics);
         Assert.Contains("powerWatts", parsed.AvailableMetrics);
         Assert.Equal(112, samples[0].GetProperty("heartRateBpm").GetDouble());
         Assert.False(samples[0].TryGetProperty("powerWatts", out _));
         Assert.False(samples[2].TryGetProperty("heartRateBpm", out _));
         Assert.Equal(218, samples[2].GetProperty("powerWatts").GetDouble());
+        Assert.Equal(0, parsed.Points[0].ElapsedSeconds);
+        Assert.Equal(112, parsed.Points[0].HeartRateBpm);
+        Assert.Null(parsed.Points[0].PowerWatts);
+        Assert.Null(parsed.Points[2].HeartRateBpm);
+        Assert.Equal(218, parsed.Points[2].PowerWatts);
     }
 
     [Fact]
@@ -39,6 +45,7 @@ public sealed class GarminTimeSeriesPayloadParserTests
 
         var samples = result.Samples.RootElement.EnumerateArray().ToArray();
         Assert.Equal(3, result.SampleCount);
+        Assert.Equal(3, result.Points.Count);
         Assert.Equal([18d, 21d, 35d], samples.Select(GetValue).ToArray());
     }
 

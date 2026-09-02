@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using Garmin.Connect.Models;
 using Microsoft.EntityFrameworkCore;
 using OpenHealthMCP.Data;
@@ -16,7 +17,7 @@ internal sealed class GarminProvider(
     private const string SourceName = "garmin";
     private const int MaximumActivityStreamSamples = 2000;
     private const int ActivityStreamBackfillDays = 365;
-    private const int DailyTimelineRetentionDays = 365;
+    private const string ParserVersion = "garmin-v1";
     private int _authenticationLogged;
 
     public string Name => SourceName;
@@ -37,8 +38,6 @@ internal sealed class GarminProvider(
         logger.LogInformation("Garmin sync started for {From} through {To}", from, to);
         var failures = new List<Exception>();
         var dailyUpdates = 0;
-        await PruneDailyTimelinesAsync(cancellationToken);
-
         for (var date = from; date <= to; date = date.AddDays(1))
         {
             dailyUpdates += await RunUnitAsync(
@@ -53,14 +52,11 @@ internal sealed class GarminProvider(
                 failures,
                 cancellationToken);
 
-            if (ShouldSyncDailyTimeline(date))
-            {
-                dailyUpdates += await RunUnitAsync(
-                    $"daily timelines for {date}",
-                    () => SyncDailyTimelinesAsync(date, cancellationToken),
-                    failures,
-                    cancellationToken);
-            }
+            dailyUpdates += await RunUnitAsync(
+                $"daily timelines for {date}",
+                () => SyncDailyTimelinesAsync(date, cancellationToken),
+                failures,
+                cancellationToken);
 
             dailyUpdates += await RunUnitAsync(
                 $"sleep for {date}",
@@ -112,7 +108,7 @@ internal sealed class GarminProvider(
         await UpsertDailySegmentAsync(
             date,
             "daily",
-            payload.Payload,
+            payload,
             metric =>
             {
                 metric.Steps = GetInt32(root, "totalSteps");
@@ -153,7 +149,7 @@ internal sealed class GarminProvider(
         await UpsertDailySegmentAsync(
             date,
             "heart_rate",
-            payload.Payload,
+            payload,
             metric =>
             {
                 metric.RestingHeartRate = GetInt32(root, "restingHeartRate");
@@ -163,16 +159,13 @@ internal sealed class GarminProvider(
             },
             cancellationToken);
 
-        if (ShouldSyncDailyTimeline(date))
-        {
-            var timeline = GarminTimeSeriesPayloadParser.ParseDescriptorTimeline(
-                root,
-                "heartRateValueDescriptors",
-                "heartRateValues",
-                "timestamp",
-                "heartRate");
-            await UpsertTimelineAsync(date, "heart_rate", timeline, cancellationToken);
-        }
+        var timeline = GarminTimeSeriesPayloadParser.ParseDescriptorTimeline(
+            root,
+            "heartRateValueDescriptors",
+            "heartRateValues",
+            "timestamp",
+            "heartRate");
+        await UpsertTimelineAsync(date, "heart_rate", "bpm", timeline, cancellationToken);
 
         return 1;
     }
@@ -207,34 +200,18 @@ internal sealed class GarminProvider(
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        await UpsertTimelineAsync(dbContext, date, "stress", stress, now, cancellationToken);
-        await UpsertTimelineAsync(dbContext, date, "body_battery", bodyBattery, now, cancellationToken);
+        await UpsertTimelineAsync(dbContext, date, "stress", "score", stress, now, cancellationToken);
+        await UpsertTimelineAsync(dbContext, date, "body_battery", "score", bodyBattery, now, cancellationToken);
         await UpsertRawAsync(
             dbContext,
             "daily_timeline",
             date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
-            JsonDocument.Parse(payload.Payload),
+            payload,
             now,
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return 1;
     }
-
-    private async Task PruneDailyTimelinesAsync(CancellationToken cancellationToken)
-    {
-        var cutoff = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-(DailyTimelineRetentionDays - 1));
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var deleted = await dbContext.DailyTimelines
-            .Where(item => item.Source == SourceName && item.Date < cutoff)
-            .ExecuteDeleteAsync(cancellationToken);
-        if (deleted > 0)
-        {
-            logger.LogInformation("Removed {Count} Garmin daily timeline documents older than {Cutoff}", deleted, cutoff);
-        }
-    }
-
-    private static bool ShouldSyncDailyTimeline(DateOnly date) =>
-        date >= DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-(DailyTimelineRetentionDays - 1));
 
     private async Task<int> SyncSleepAsync(DateOnly date, CancellationToken cancellationToken)
     {
@@ -261,7 +238,7 @@ internal sealed class GarminProvider(
         await UpsertDailySegmentAsync(
             date,
             "sleep",
-            payload.Payload,
+            payload,
             metric =>
             {
                 metric.SleepScore = sleepScore;
@@ -312,7 +289,7 @@ internal sealed class GarminProvider(
         await UpsertDailySegmentAsync(
             date,
             "hrv",
-            payload.Payload,
+            payload,
             metric => metric.Hrv = hrv,
             cancellationToken);
 
@@ -339,7 +316,7 @@ internal sealed class GarminProvider(
                 "Garmin returned activities without capturable JSON payloads.");
         }
 
-        var rawById = new Dictionary<string, string>(StringComparer.Ordinal);
+        var rawById = new Dictionary<string, RawActivityPayload>(StringComparer.Ordinal);
         foreach (var payload in activityPayloads)
         {
             using var document = JsonDocument.Parse(payload.Payload);
@@ -352,7 +329,7 @@ internal sealed class GarminProvider(
             {
                 if (element.TryGetProperty("activityId", out var activityId))
                 {
-                    rawById[activityId.ToString()] = element.GetRawText();
+                    rawById[activityId.ToString()] = new RawActivityPayload(element.GetRawText(), payload);
                 }
             }
         }
@@ -365,11 +342,12 @@ internal sealed class GarminProvider(
         foreach (var garminActivity in activities ?? [])
         {
             var externalId = garminActivity.ActivityId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (!rawById.TryGetValue(externalId, out var rawJson))
+            if (!rawById.TryGetValue(externalId, out var rawPayload))
             {
                 throw new JsonException($"Garmin activity {externalId} was missing from its raw response.");
             }
 
+            var rawJson = rawPayload.Json;
             using var rawDocument = JsonDocument.Parse(rawJson);
             var rawActivity = rawDocument.RootElement;
             var summary = GarminActivityPayloadParser.ParseSummary(rawActivity);
@@ -404,7 +382,10 @@ internal sealed class GarminProvider(
                 dbContext,
                 "activity",
                 externalId,
-                JsonDocument.Parse(rawJson),
+                new CapturedGarminPayload(
+                    rawPayload.Response.RequestUri,
+                    rawPayload.Response.StatusCode,
+                    System.Text.Encoding.UTF8.GetBytes(rawJson)),
                 now,
                 cancellationToken);
             count++;
@@ -552,12 +533,13 @@ internal sealed class GarminProvider(
 
             stream.SampleCount = parsed.SampleCount;
             stream.AvailableMetrics = parsed.AvailableMetrics;
+            await ReplaceActivitySamplesAsync(dbContext, activity, parsed.Points, now, cancellationToken);
             activity.StreamsSyncedAt = now;
             await UpsertRawAsync(
                 dbContext,
                 "activity_details",
                 activity.ExternalId,
-                JsonDocument.Parse(payload.Payload),
+                payload,
                 now,
                 cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -615,7 +597,7 @@ internal sealed class GarminProvider(
                 dbContext,
                 "activity_splits",
                 activity.ExternalId,
-                JsonDocument.Parse(payload.Payload),
+                payload,
                 now,
                 cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -673,7 +655,7 @@ internal sealed class GarminProvider(
                 dbContext,
                 "activity_hr_zones",
                 activity.ExternalId,
-                JsonDocument.Parse(payload.Payload),
+                payload,
                 now,
                 cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -803,7 +785,7 @@ internal sealed class GarminProvider(
     private async Task UpsertDailySegmentAsync(
         DateOnly date,
         string dataType,
-        byte[] payload,
+        CapturedGarminPayload payload,
         Action<DailyMetric> update,
         CancellationToken cancellationToken)
     {
@@ -832,7 +814,7 @@ internal sealed class GarminProvider(
             dbContext,
             dataType,
             date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
-            JsonDocument.Parse(payload),
+            payload,
             now,
             cancellationToken);
 
@@ -842,6 +824,7 @@ internal sealed class GarminProvider(
     private async Task UpsertTimelineAsync(
         DateOnly date,
         string metric,
+        string unit,
         ParsedTimeline timeline,
         CancellationToken cancellationToken)
     {
@@ -850,6 +833,7 @@ internal sealed class GarminProvider(
             dbContext,
             date,
             metric,
+            unit,
             timeline,
             DateTimeOffset.UtcNow,
             cancellationToken);
@@ -860,6 +844,7 @@ internal sealed class GarminProvider(
         AppDbContext dbContext,
         DateOnly date,
         string metric,
+        string unit,
         ParsedTimeline timeline,
         DateTimeOffset updatedAt,
         CancellationToken cancellationToken)
@@ -886,20 +871,30 @@ internal sealed class GarminProvider(
         }
 
         stored.SampleCount = timeline.SampleCount;
+        await ReplaceHealthMetricSamplesAsync(
+            dbContext,
+            date,
+            metric,
+            unit,
+            timeline.Points,
+            updatedAt,
+            cancellationToken);
     }
 
     private static async Task UpsertRawAsync(
         AppDbContext dbContext,
         string dataType,
         string externalId,
-        JsonDocument payload,
+        CapturedGarminPayload payload,
         DateTimeOffset fetchedAt,
         CancellationToken cancellationToken)
     {
+        var payloadHash = Convert.ToHexString(SHA256.HashData(payload.Payload)).ToLowerInvariant();
         var raw = await dbContext.RawProviderData.SingleOrDefaultAsync(
             item => item.Source == SourceName &&
                     item.DataType == dataType &&
-                    item.ExternalId == externalId,
+                    item.ExternalId == externalId &&
+                    item.PayloadHash == payloadHash,
             cancellationToken);
 
         if (raw is null)
@@ -909,14 +904,75 @@ internal sealed class GarminProvider(
                 Source = SourceName,
                 DataType = dataType,
                 ExternalId = externalId,
+                Endpoint = payload.RequestUri.AbsolutePath,
+                HttpStatusCode = (int)payload.StatusCode,
                 FetchedAt = fetchedAt,
-                Payload = payload
+                PayloadHash = payloadHash,
+                ParserVersion = ParserVersion,
+                Payload = JsonDocument.Parse(payload.Payload)
             });
             return;
         }
 
-        raw.Payload = payload;
         raw.FetchedAt = fetchedAt;
+        raw.ParserVersion = ParserVersion;
+    }
+
+    private static async Task ReplaceHealthMetricSamplesAsync(
+        AppDbContext dbContext,
+        DateOnly date,
+        string metric,
+        string unit,
+        IReadOnlyList<TimelinePoint> points,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        var existing = await dbContext.HealthMetricSamples
+            .Where(item => item.Source == SourceName && item.LocalDate == date && item.Metric == metric)
+            .ToListAsync(cancellationToken);
+        dbContext.HealthMetricSamples.RemoveRange(existing);
+        dbContext.HealthMetricSamples.AddRange(points.Select(point => new HealthMetricSample
+        {
+            Source = SourceName,
+            Metric = metric,
+            LocalDate = date,
+            TimestampUtc = point.Timestamp,
+            ValueNumeric = point.Value,
+            Unit = unit,
+            SourceType = "garmin_api",
+            UpdatedAt = updatedAt
+        }));
+    }
+
+    private static async Task ReplaceActivitySamplesAsync(
+        AppDbContext dbContext,
+        Activity activity,
+        IReadOnlyList<ParsedActivityPoint> points,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        var existing = await dbContext.ActivitySamples
+            .Where(item => item.ActivityId == activity.Id)
+            .ToListAsync(cancellationToken);
+        dbContext.ActivitySamples.RemoveRange(existing);
+        dbContext.ActivitySamples.AddRange(points.Select(point => new ActivitySample
+        {
+            Activity = activity,
+            ActivityId = activity.Id,
+            TimestampUtc = point.TimestampUtc,
+            ElapsedSeconds = point.ElapsedSeconds,
+            HeartRateBpm = point.HeartRateBpm,
+            DistanceMeters = point.DistanceMeters,
+            SpeedMetersPerSecond = point.SpeedMetersPerSecond,
+            PaceSecondsPerKilometer = point.PaceSecondsPerKilometer,
+            ElevationMeters = point.ElevationMeters,
+            Cadence = point.Cadence,
+            PowerWatts = point.PowerWatts,
+            TemperatureCelsius = point.TemperatureCelsius,
+            RespirationRate = point.RespirationRate,
+            SourceType = "garmin_api",
+            UpdatedAt = updatedAt
+        }));
     }
 
     private async Task<int> RunUnitAsync(
@@ -1140,5 +1196,7 @@ internal sealed class GarminProvider(
 
     private static DateTimeOffset ToUtcOffset(DateTime value) =>
         new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
+
+    private sealed record RawActivityPayload(string Json, CapturedGarminPayload Response);
 
 }

@@ -48,5 +48,6 @@ public sealed class Activity
 
     public ICollection<ActivityLap> Laps { get; set; } = [];
     public ICollection<ActivityHeartRateZone> HeartRateZones { get; set; } = [];
+    public ICollection<ActivitySample> Samples { get; set; } = [];
     public ActivityStream? Stream { get; set; }
 }

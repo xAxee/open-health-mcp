@@ -33,7 +33,7 @@ internal static class GarminTimeSeriesPayloadParser
             !TryGetProperty(root, "activityDetailMetrics", out var samples) ||
             samples.ValueKind != JsonValueKind.Array)
         {
-            return new ParsedActivityStream([], JsonSerializer.SerializeToDocument(Array.Empty<object>()));
+            return EmptyActivityStream();
         }
 
         var indexes = new Dictionary<int, string>();
@@ -98,7 +98,15 @@ internal static class GarminTimeSeriesPayloadParser
             .Distinct(StringComparer.Ordinal)
             .OrderBy(key => key, StringComparer.Ordinal)
             .ToArray();
-        return new ParsedActivityStream(availableMetrics, JsonSerializer.SerializeToDocument(rows));
+        var points = rows
+            .Select(ToActivityPoint)
+            .Where(point => point is not null)
+            .Select(point => point!)
+            .OrderBy(point => point.ElapsedSeconds)
+            .GroupBy(point => point.ElapsedSeconds)
+            .Select(group => group.Last())
+            .ToArray();
+        return new ParsedActivityStream(availableMetrics, points, JsonSerializer.SerializeToDocument(rows));
     }
 
     public static ParsedTimeline ParseDescriptorTimeline(
@@ -158,7 +166,7 @@ internal static class GarminTimeSeriesPayloadParser
             .GroupBy(point => point.Timestamp)
             .Select(group => group.Last())
             .ToArray();
-        return new ParsedTimeline(ordered.Length, JsonSerializer.SerializeToDocument(ordered));
+        return new ParsedTimeline(ordered, JsonSerializer.SerializeToDocument(ordered));
     }
 
     private static int? FindDescriptorIndex(JsonElement descriptors, string requestedKey)
@@ -189,7 +197,37 @@ internal static class GarminTimeSeriesPayloadParser
     };
 
     private static ParsedTimeline EmptyTimeline() =>
-        new(0, JsonSerializer.SerializeToDocument(Array.Empty<TimelinePoint>()));
+        new([], JsonSerializer.SerializeToDocument(Array.Empty<TimelinePoint>()));
+
+    private static ParsedActivityStream EmptyActivityStream() =>
+        new([], [], JsonSerializer.SerializeToDocument(Array.Empty<object>()));
+
+    private static ParsedActivityPoint? ToActivityPoint(IReadOnlyDictionary<string, object?> row)
+    {
+        var elapsed = GetRowDouble(row, "elapsedTimeSeconds");
+        if (!elapsed.HasValue || elapsed < 0)
+        {
+            return null;
+        }
+
+        return new ParsedActivityPoint(
+            row.TryGetValue("timestamp", out var timestamp) && timestamp is DateTimeOffset timestampValue
+                ? timestampValue
+                : null,
+            elapsed.Value,
+            GetRowDouble(row, "heartRateBpm"),
+            GetRowDouble(row, "distanceMeters"),
+            GetRowDouble(row, "speedMetersPerSecond"),
+            GetRowDouble(row, "paceSecondsPerKilometer"),
+            GetRowDouble(row, "altitudeMeters"),
+            GetRowDouble(row, "cadence"),
+            GetRowDouble(row, "powerWatts"),
+            GetRowDouble(row, "temperatureCelsius"),
+            GetRowDouble(row, "respirationRate"));
+    }
+
+    private static double? GetRowDouble(IReadOnlyDictionary<string, object?> row, string key) =>
+        row.TryGetValue(key, out var value) && value is double number ? number : null;
 
     private static DateTimeOffset? ParseTimestamp(double value)
     {
@@ -245,12 +283,32 @@ internal static class GarminTimeSeriesPayloadParser
         return false;
     }
 
-    private sealed record TimelinePoint(DateTimeOffset Timestamp, double Value);
 }
 
-internal sealed record ParsedActivityStream(string[] AvailableMetrics, JsonDocument Samples)
+internal sealed record ParsedActivityStream(
+    string[] AvailableMetrics,
+    IReadOnlyList<ParsedActivityPoint> Points,
+    JsonDocument Samples)
 {
-    public int SampleCount => Samples.RootElement.GetArrayLength();
+    public int SampleCount => Points.Count;
 }
 
-internal sealed record ParsedTimeline(int SampleCount, JsonDocument Samples);
+internal sealed record ParsedActivityPoint(
+    DateTimeOffset? TimestampUtc,
+    double ElapsedSeconds,
+    double? HeartRateBpm,
+    double? DistanceMeters,
+    double? SpeedMetersPerSecond,
+    double? PaceSecondsPerKilometer,
+    double? ElevationMeters,
+    double? Cadence,
+    double? PowerWatts,
+    double? TemperatureCelsius,
+    double? RespirationRate);
+
+internal sealed record ParsedTimeline(IReadOnlyList<TimelinePoint> Points, JsonDocument Samples)
+{
+    public int SampleCount => Points.Count;
+}
+
+internal sealed record TimelinePoint(DateTimeOffset Timestamp, double Value);
