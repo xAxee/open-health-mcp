@@ -14,6 +14,9 @@ internal sealed class GarminProvider(
     ILogger<GarminProvider> logger) : IHealthDataProvider
 {
     private const string SourceName = "garmin";
+    private const int MaximumActivityStreamSamples = 2000;
+    private const int ActivityStreamBackfillDays = 365;
+    private const int DailyTimelineRetentionDays = 365;
     private int _authenticationLogged;
 
     public string Name => SourceName;
@@ -34,6 +37,7 @@ internal sealed class GarminProvider(
         logger.LogInformation("Garmin sync started for {From} through {To}", from, to);
         var failures = new List<Exception>();
         var dailyUpdates = 0;
+        await PruneDailyTimelinesAsync(cancellationToken);
 
         for (var date = from; date <= to; date = date.AddDays(1))
         {
@@ -48,6 +52,15 @@ internal sealed class GarminProvider(
                 () => SyncHeartRateAsync(date, cancellationToken),
                 failures,
                 cancellationToken);
+
+            if (ShouldSyncDailyTimeline(date))
+            {
+                dailyUpdates += await RunUnitAsync(
+                    $"daily timelines for {date}",
+                    () => SyncDailyTimelinesAsync(date, cancellationToken),
+                    failures,
+                    cancellationToken);
+            }
 
             dailyUpdates += await RunUnitAsync(
                 $"sleep for {date}",
@@ -110,6 +123,11 @@ internal sealed class GarminProvider(
                 metric.BodyBatteryMin = GetInt32(root, "bodyBatteryLowestValue");
                 metric.BodyBatteryMax = GetInt32(root, "bodyBatteryHighestValue");
                 metric.Calories = GetInt32(root, "totalKilocalories");
+                metric.ActiveCalories = GetInt32(root, "activeKilocalories");
+                metric.ModerateIntensityMinutes = GetInt32(root, "moderateIntensityMinutes");
+                metric.VigorousIntensityMinutes = GetInt32(root, "vigorousIntensityMinutes");
+                metric.AverageRespirationRate = GetDouble(root, "avgWakingRespirationValue");
+                metric.AverageSpo2 = GetDouble(root, "averageSpo2");
             },
             cancellationToken);
 
@@ -145,8 +163,78 @@ internal sealed class GarminProvider(
             },
             cancellationToken);
 
+        if (ShouldSyncDailyTimeline(date))
+        {
+            var timeline = GarminTimeSeriesPayloadParser.ParseDescriptorTimeline(
+                root,
+                "heartRateValueDescriptors",
+                "heartRateValues",
+                "timestamp",
+                "heartRate");
+            await UpsertTimelineAsync(date, "heart_rate", timeline, cancellationToken);
+        }
+
         return 1;
     }
+
+    private async Task<int> SyncDailyTimelinesAsync(DateOnly date, CancellationToken cancellationToken)
+    {
+        var asDateTime = date.ToDateTime(TimeOnly.MinValue);
+        var payload = await FetchPayloadAsync(
+            "daily stress and Body Battery",
+            "/wellness-service/wellness/dailyStress/",
+            () => session.Client.GetAllDayStress(asDateTime, cancellationToken),
+            cancellationToken);
+        if (payload is null)
+        {
+            return 0;
+        }
+
+        using var document = JsonDocument.Parse(payload.Payload);
+        var root = document.RootElement;
+        var stress = GarminTimeSeriesPayloadParser.ParseDescriptorTimeline(
+            root,
+            "stressValueDescriptorsDTOList",
+            "stressValuesArray",
+            "timestamp",
+            "stressLevel");
+        var bodyBattery = GarminTimeSeriesPayloadParser.ParseDescriptorTimeline(
+            root,
+            "bodyBatteryValueDescriptorsDTOList",
+            "bodyBatteryValuesArray",
+            "timestamp",
+            "bodyBatteryLevel");
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        await UpsertTimelineAsync(dbContext, date, "stress", stress, now, cancellationToken);
+        await UpsertTimelineAsync(dbContext, date, "body_battery", bodyBattery, now, cancellationToken);
+        await UpsertRawAsync(
+            dbContext,
+            "daily_timeline",
+            date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            JsonDocument.Parse(payload.Payload),
+            now,
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return 1;
+    }
+
+    private async Task PruneDailyTimelinesAsync(CancellationToken cancellationToken)
+    {
+        var cutoff = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-(DailyTimelineRetentionDays - 1));
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var deleted = await dbContext.DailyTimelines
+            .Where(item => item.Source == SourceName && item.Date < cutoff)
+            .ExecuteDeleteAsync(cancellationToken);
+        if (deleted > 0)
+        {
+            logger.LogInformation("Removed {Count} Garmin daily timeline documents older than {Cutoff}", deleted, cutoff);
+        }
+    }
+
+    private static bool ShouldSyncDailyTimeline(DateOnly date) =>
+        date >= DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-(DailyTimelineRetentionDays - 1));
 
     private async Task<int> SyncSleepAsync(DateOnly date, CancellationToken cancellationToken)
     {
@@ -174,7 +262,18 @@ internal sealed class GarminProvider(
             date,
             "sleep",
             payload.Payload,
-            metric => metric.SleepScore = sleepScore,
+            metric =>
+            {
+                metric.SleepScore = sleepScore;
+                if (TryGetProperty(document.RootElement, "dailySleepDTO", out var dailySleep))
+                {
+                    metric.SleepDurationSeconds = GetInt32(dailySleep, "sleepTimeSeconds");
+                    metric.DeepSleepSeconds = GetInt32(dailySleep, "deepSleepSeconds");
+                    metric.LightSleepSeconds = GetInt32(dailySleep, "lightSleepSeconds");
+                    metric.RemSleepSeconds = GetInt32(dailySleep, "remSleepSeconds");
+                    metric.AwakeSleepSeconds = GetInt32(dailySleep, "awakeSleepSeconds");
+                }
+            },
             cancellationToken);
 
         return 1;
@@ -336,9 +435,11 @@ internal sealed class GarminProvider(
                            externalIds.Contains(item.ExternalId) &&
                            (item.LapsSyncedAt == null ||
                             item.HeartRateZonesSyncedAt == null ||
+                            item.StartedAt >= now.AddDays(-ActivityStreamBackfillDays) && item.StreamsSyncedAt == null ||
                             item.StartedAt >= recentActivityThreshold &&
                             (item.LapsSyncedAt < refreshThreshold ||
-                             item.HeartRateZonesSyncedAt < refreshThreshold)))
+                             item.HeartRateZonesSyncedAt < refreshThreshold ||
+                             item.StreamsSyncedAt < refreshThreshold)))
             .OrderByDescending(item => item.StartedAt)
             .Take(options.ActivityEnrichmentLimit)
             .ToListAsync(cancellationToken);
@@ -388,6 +489,93 @@ internal sealed class GarminProvider(
                     await DelayEnrichmentAsync(cancellationToken);
                 }
             }
+
+            if (activity.StartedAt >= now.AddDays(-ActivityStreamBackfillDays) &&
+                (activity.StreamsSyncedAt is null || refreshRecent && activity.StreamsSyncedAt < refreshThreshold))
+            {
+                await using var streamContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var streamActivity = await streamContext.Activities.SingleAsync(
+                    item => item.Id == activity.Id,
+                    cancellationToken);
+                await TrySyncActivityStreamAsync(streamContext, streamActivity, cancellationToken);
+                await DelayEnrichmentAsync(cancellationToken);
+            }
+        }
+    }
+
+    private async Task TrySyncActivityStreamAsync(
+        AppDbContext dbContext,
+        Activity activity,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var endpoint = $"/activity-service/activity/{activity.ExternalId}/details";
+            var payload = await FetchPayloadAsync(
+                "activity details",
+                endpoint,
+                () => session.Client.GetActivityDetails(
+                    long.Parse(activity.ExternalId, System.Globalization.CultureInfo.InvariantCulture),
+                    MaximumActivityStreamSamples,
+                    0,
+                    cancellationToken),
+                cancellationToken);
+            if (payload is null)
+            {
+                activity.StreamsSyncedAt = DateTimeOffset.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            using var document = JsonDocument.Parse(payload.Payload);
+            var parsed = GarminTimeSeriesPayloadParser.ParseActivityStream(document.RootElement, activity.StartedAt);
+            var stream = await dbContext.ActivityStreams.SingleOrDefaultAsync(
+                item => item.ActivityId == activity.Id,
+                cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            if (stream is null)
+            {
+                stream = new ActivityStream
+                {
+                    Activity = activity,
+                    ActivityId = activity.Id,
+                    Samples = parsed.Samples,
+                    UpdatedAt = now
+                };
+                dbContext.ActivityStreams.Add(stream);
+            }
+            else
+            {
+                stream.Samples = parsed.Samples;
+                stream.UpdatedAt = now;
+            }
+
+            stream.SampleCount = parsed.SampleCount;
+            stream.AvailableMetrics = parsed.AvailableMetrics;
+            activity.StreamsSyncedAt = now;
+            await UpsertRawAsync(
+                dbContext,
+                "activity_details",
+                activity.ExternalId,
+                JsonDocument.Parse(payload.Payload),
+                now,
+                cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            if (IsUnsupportedEnrichment(exception))
+            {
+                activity.StreamsSyncedAt = DateTimeOffset.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            HandleEnrichmentFailure(activity.ExternalId, "streams", exception);
         }
     }
 
@@ -649,6 +837,55 @@ internal sealed class GarminProvider(
             cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task UpsertTimelineAsync(
+        DateOnly date,
+        string metric,
+        ParsedTimeline timeline,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        await UpsertTimelineAsync(
+            dbContext,
+            date,
+            metric,
+            timeline,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task UpsertTimelineAsync(
+        AppDbContext dbContext,
+        DateOnly date,
+        string metric,
+        ParsedTimeline timeline,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        var stored = await dbContext.DailyTimelines.SingleOrDefaultAsync(
+            item => item.Source == SourceName && item.Date == date && item.Metric == metric,
+            cancellationToken);
+        if (stored is null)
+        {
+            stored = new DailyTimeline
+            {
+                Source = SourceName,
+                Date = date,
+                Metric = metric,
+                Samples = timeline.Samples,
+                UpdatedAt = updatedAt
+            };
+            dbContext.DailyTimelines.Add(stored);
+        }
+        else
+        {
+            stored.Samples = timeline.Samples;
+            stored.UpdatedAt = updatedAt;
+        }
+
+        stored.SampleCount = timeline.SampleCount;
     }
 
     private static async Task UpsertRawAsync(

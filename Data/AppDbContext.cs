@@ -9,6 +9,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Activity> Activities => Set<Activity>();
     public DbSet<ActivityLap> ActivityLaps => Set<ActivityLap>();
     public DbSet<ActivityHeartRateZone> ActivityHeartRateZones => Set<ActivityHeartRateZone>();
+    public DbSet<ActivityStream> ActivityStreams => Set<ActivityStream>();
+    public DbSet<DailyTimeline> DailyTimelines => Set<DailyTimeline>();
     public DbSet<RawProviderData> RawProviderData => Set<RawProviderData>();
     public DbSet<SyncState> SyncStates => Set<SyncState>();
     public DbSet<OAuthClient> OAuthClients => Set<OAuthClient>();
@@ -31,6 +33,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.Source, x.ExternalId }).IsUnique();
             entity.HasIndex(x => x.StartedAt);
+            entity.HasIndex(x => new { x.Source, x.ActivityType, x.StartedAt });
             entity.Property(x => x.Source).HasMaxLength(50);
             entity.Property(x => x.ExternalId).HasMaxLength(200);
             entity.Property(x => x.Name).HasMaxLength(500);
@@ -43,6 +46,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasMany(x => x.HeartRateZones)
                 .WithOne(x => x.Activity)
                 .HasForeignKey(x => x.ActivityId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Stream)
+                .WithOne(x => x.Activity)
+                .HasForeignKey<ActivityStream>(x => x.ActivityId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -60,6 +67,25 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.ToTable("activity_heart_rate_zones");
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.ActivityId, x.ZoneNumber }).IsUnique();
+        });
+
+        modelBuilder.Entity<ActivityStream>(entity =>
+        {
+            entity.ToTable("activity_streams");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ActivityId).IsUnique();
+            entity.Property(x => x.AvailableMetrics).HasColumnType("text[]");
+            entity.Property(x => x.Samples).HasColumnType("jsonb");
+        });
+
+        modelBuilder.Entity<DailyTimeline>(entity =>
+        {
+            entity.ToTable("daily_timelines");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.Date, x.Metric }).IsUnique();
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.Metric).HasMaxLength(50);
+            entity.Property(x => x.Samples).HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<RawProviderData>(entity =>
