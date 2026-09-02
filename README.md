@@ -86,6 +86,101 @@ docker compose logs -f openhealthmcp
 
 Pending EF Core migrations are applied automatically. PostgreSQL is reachable only on the internal Compose network and is not published to the host.
 
+## Production deployment
+
+The repository includes a GitHub Actions pipeline and production Docker Compose configuration for deployment through an existing Caddy reverse proxy:
+
+- `.github/workflows/ci-cd.yml` validates the application, publishes immutable images to GHCR, and deploys `main` through SSH;
+- `deploy/compose.production.yml` exposes the application only to Docker networks and keeps PostgreSQL private;
+- `deploy/deploy.sh` deploys an immutable `sha-<commit>` image, checks `/health`, and attempts rollback when a previous image is locally available;
+- `deploy/Caddyfile.health` contains the `health.hubertiwan.pl` reverse-proxy block.
+
+The production host is expected to provide an external Docker network named `proxy`. The OpenHealthMCP application joins this network under the DNS name `openhealthmcp`; PostgreSQL remains attached only to the private project network.
+
+### One-time VPS preparation
+
+Create the deployment directory as the SSH deployment user:
+
+```bash
+install -d -m 700 /home/nexus-deploy/openhealthmcp
+touch /home/nexus-deploy/openhealthmcp/.env
+chmod 600 /home/nexus-deploy/openhealthmcp/.env
+```
+
+Populate `/home/nexus-deploy/openhealthmcp/.env` from `deploy/.env.example`. Generate independent hexadecimal secrets so they are safe in both dotenv and PostgreSQL connection-string syntax:
+
+```bash
+openssl rand -hex 32
+openssl rand -hex 32
+```
+
+Use the first value for `POSTGRES_PASSWORD` and the second for `MCP_AUTH_TOKEN`. Add the Garmin credentials without committing or copying this file into CI. Keep its permissions at `600`.
+
+If the GHCR package is private, log in once as the deployment user with a fine-grained token that has read-only package access:
+
+```bash
+read -rsp 'GHCR token: ' GHCR_TOKEN
+echo
+printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username xAxee --password-stdin
+unset GHCR_TOKEN
+```
+
+Do not put that token in `.env`. The token value is read without terminal echo and does not appear in the command history. Alternatively, make the GHCR package public after its first publication.
+
+### Existing Caddy integration
+
+Append `deploy/Caddyfile.health` to the existing host Caddyfile only once. Validate the complete configuration before reloading Caddy:
+
+```bash
+docker exec portfolio-caddy \
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker exec portfolio-caddy \
+  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+Caddy must share the external `proxy` network with OpenHealthMCP. Do not publish application port `8080` or PostgreSQL port `5432` on the host.
+
+### GitHub Actions configuration
+
+Configure these repository or `production` environment secrets:
+
+| Secret | Value |
+|---|---|
+| `VPS_HOST` | VPS hostname or IP address. |
+| `VPS_SSH_PORT` | SSH port, normally `22`. |
+| `VPS_USER` | `nexus-deploy`. |
+| `VPS_SSH_PRIVATE_KEY` | Dedicated unencrypted Ed25519 private key used only by GitHub Actions. |
+| `VPS_SSH_KNOWN_HOSTS` | Verified `known_hosts` entry for the VPS; do not disable host-key checking. |
+
+Install the matching public key in `/home/nexus-deploy/.ssh/authorized_keys`. The deployment user needs Docker access but does not need permission to modify Caddy or other applications.
+
+Every pull request to `main` runs validation. A successful push to `main` additionally publishes:
+
+```text
+ghcr.io/xaxee/open-health-mcp:sha-<full-commit-sha>
+ghcr.io/xaxee/open-health-mcp:latest
+```
+
+Only the immutable SHA tag is deployed. The workflow copies the production Compose file and deployment script, preserves the VPS `.env`, updates only the `openhealthmcp` Compose project, and verifies `https://health.hubertiwan.pl/health`.
+
+### Operations and rollback
+
+Inspect the isolated project without affecting other VPS applications:
+
+```bash
+cd /home/nexus-deploy/openhealthmcp
+docker compose --project-name openhealthmcp --file compose.production.yml ps
+docker compose --project-name openhealthmcp --file compose.production.yml logs --tail 100 openhealthmcp
+```
+
+For a manual rollback, replace `OPENHEALTHMCP_IMAGE` in `.env` with a previously published immutable SHA tag and run:
+
+```bash
+./deploy.sh ghcr.io/xaxee/open-health-mcp:sha-PREVIOUS_FULL_COMMIT_SHA
+```
+
+Never run a host-wide `docker compose down`, `docker system prune --volumes`, or volume removal command on the shared VPS.
+
 ## Configuration
 
 | Variable | Required | Default | Purpose |
