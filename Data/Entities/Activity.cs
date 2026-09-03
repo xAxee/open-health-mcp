@@ -17,6 +17,8 @@ public sealed class Activity
     public int? MaxHeartRate { get; set; }
     public double? ElevationGainMeters { get; set; }
     public double? ElevationLossMeters { get; set; }
+    public double? MinElevationMeters { get; set; }
+    public double? MaxElevationMeters { get; set; }
     public double? AverageSpeedMetersPerSecond { get; set; }
     public double? MaxSpeedMetersPerSecond { get; set; }
     public double? AveragePaceSecondsPerKilometer { get; set; }
@@ -27,6 +29,10 @@ public sealed class Activity
     public double? AveragePowerWatts { get; set; }
     public double? MaxPowerWatts { get; set; }
     public double? NormalizedPowerWatts { get; set; }
+    public double? MaxTwentyMinutePowerWatts { get; set; }
+    public double? AverageVerticalOscillationMillimeters { get; set; }
+    public double? AverageGroundContactTimeMilliseconds { get; set; }
+    public double? AverageStrideLengthMeters { get; set; }
     public double? MinTemperatureCelsius { get; set; }
     public double? MaxTemperatureCelsius { get; set; }
     public double? AverageRespirationRate { get; set; }
@@ -40,6 +46,8 @@ public sealed class Activity
     public double? TrainingStressScore { get; set; }
     public double? IntensityFactor { get; set; }
     public double? Vo2Max { get; set; }
+    public string? ParentExternalId { get; set; }
+    public bool? IsParent { get; set; }
     public DateTimeOffset? LapsSyncedAt { get; set; }
     public DateTimeOffset? HeartRateZonesSyncedAt { get; set; }
     public DateTimeOffset? StreamsSyncedAt { get; set; }

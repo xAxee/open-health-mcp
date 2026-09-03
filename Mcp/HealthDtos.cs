@@ -182,7 +182,17 @@ public sealed record ActivityResult(
     double? Vo2Max,
     bool LapsSynchronized,
     bool HeartRateZonesSynchronized,
-    bool StreamsSynchronized);
+    bool StreamsSynchronized,
+    double? MinElevationMeters,
+    double? MaxElevationMeters,
+    double? MaxTwentyMinutePowerWatts,
+    double? AverageVerticalOscillationMillimeters,
+    double? AverageGroundContactTimeMilliseconds,
+    double? AverageStrideLengthMeters,
+    string? ParentActivityId,
+    bool? IsParent,
+    MetricSourceMetadata SummarySource,
+    MetricSourceMetadata AveragePaceSource);
 
 public sealed record ActivityLookupResult(bool Found, ActivityResult? Data);
 
@@ -224,7 +234,10 @@ public sealed record ActivityHeartRateZoneResult(
     int ZoneNumber,
     double TimeSeconds,
     double? Percentage,
-    int? LowBoundaryBpm);
+    int? LowBoundaryBpm,
+    int? HighBoundaryBpm,
+    MetricSourceMetadata BoundariesSource,
+    MetricSourceMetadata PercentageSource);
 
 public sealed record ActivityHeartRateZonesResult(
     bool Found,

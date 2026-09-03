@@ -118,11 +118,11 @@ Source inspection at the exact NuGet 0.10.0 commit (`e8e811c`) confirms client m
 | Feature | Status | Current source and semantics | Gap / action |
 | --- | --- | --- | --- |
 | Activity list | `AVAILABLE` | Garmin activity search | Preserve broad activity type strings. |
-| Pagination | `PARTIAL` | `limit` 1..200 only | Add bounded offset/cursor; history remains unrestricted by plans. |
+| Pagination | `AVAILABLE` | Bounded `limit` and `offset`, stable newest-first order | History remains unrestricted by plans. |
 | Duration/elapsed/moving | `AVAILABLE` | Garmin summary | Preserve seconds. |
 | Distance | `AVAILABLE` | Garmin summary | Preserve meters. |
 | Elevation gain/loss | `AVAILABLE` | Garmin summary | Preserve meters. |
-| Min/max elevation | `PARTIAL` | Available for laps only | Add activity-level confirmed values. |
+| Min/max elevation | `AVAILABLE` | Garmin activity summary | Provider values in meters. |
 | Average/max speed | `AVAILABLE` | Garmin summary | Preserve m/s. |
 | Average pace | `DERIVED` | Deterministically derived from provider average speed | Add source/algorithm metadata; preserve compatibility field. |
 | Best pace | `MISSING` | Not normalized | Add only if provider supplies it. |
@@ -135,7 +135,7 @@ Source inspection at the exact NuGet 0.10.0 commit (`e8e811c`) confirms client m
 | Training Effect | `AVAILABLE` | Garmin aerobic/anaerobic values | Provider values; preserve. |
 | Training Load | `AVAILABLE` | Garmin `activityTrainingLoad` | Provider value; preserve. |
 | VO2max | `AVAILABLE` | Garmin activity `vO2MaxValue` | Provider value; preserve. |
-| Multisport parent/children | `MISSING` | No relationship columns | Confirm Garmin representation before implementing. |
+| Multisport parent/children | `PARTIAL` | Garmin `parentId` and `parent` are stored/exposed | Transition/leg semantics still require real multisport fixtures. |
 
 ## Activity series, laps, and HR zones
 
@@ -148,7 +148,7 @@ Source inspection at the exact NuGet 0.10.0 commit (`e8e811c`) confirms client m
 | Laps | `AVAILABLE` | Garmin `/splits` | Preserve as independent provider source. |
 | Lap power | `MISSING` | Entity has no power columns | Add confirmed values. |
 | HR-zone number/time/percentage/low boundary | `AVAILABLE` | Garmin `/hrTimeInZones` | Keep Garmin values authoritative. Percentage is derived from Garmin durations and must be marked derived. |
-| HR-zone high boundary | `MISSING` | Not inferred | May derive from next Garmin low boundary only with explicit `derived` metadata. Never use age formulas. |
+| HR-zone high boundary | `DERIVED` | Next Garmin low boundary minus one | Explicit algorithm/source metadata; final open-ended zone remains null. Never uses age formulas. |
 | HR drift | `MISSING` | Not implemented | Add deterministic `hr-drift-v1` only for suitable activities with sufficient measured streams. |
 | FIT | `MISSING` | Confirmed library path `/download-service/files/activity/{id}` | Implement binary capture/storage and parser only after validating a real download. |
 

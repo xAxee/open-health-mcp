@@ -49,6 +49,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.Name).HasMaxLength(500);
             entity.Property(x => x.ActivityType).HasMaxLength(100);
             entity.Property(x => x.CadenceUnit).HasMaxLength(30);
+            entity.Property(x => x.ParentExternalId).HasMaxLength(200);
             entity.HasMany(x => x.Laps)
                 .WithOne(x => x.Activity)
                 .HasForeignKey(x => x.ActivityId)

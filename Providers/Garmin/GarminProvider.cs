@@ -834,6 +834,8 @@ internal sealed class GarminProvider(
         activity.MaxHeartRate = summary.MaxHeartRate ?? activity.MaxHeartRate;
         activity.ElevationGainMeters = summary.ElevationGainMeters ?? activity.ElevationGainMeters;
         activity.ElevationLossMeters = summary.ElevationLossMeters ?? activity.ElevationLossMeters;
+        activity.MinElevationMeters = summary.MinElevationMeters ?? activity.MinElevationMeters;
+        activity.MaxElevationMeters = summary.MaxElevationMeters ?? activity.MaxElevationMeters;
         activity.AverageSpeedMetersPerSecond =
             summary.AverageSpeedMetersPerSecond ?? activity.AverageSpeedMetersPerSecond;
         activity.MaxSpeedMetersPerSecond = summary.MaxSpeedMetersPerSecond ?? activity.MaxSpeedMetersPerSecond;
@@ -846,6 +848,14 @@ internal sealed class GarminProvider(
         activity.AveragePowerWatts = summary.AveragePowerWatts ?? activity.AveragePowerWatts;
         activity.MaxPowerWatts = summary.MaxPowerWatts ?? activity.MaxPowerWatts;
         activity.NormalizedPowerWatts = summary.NormalizedPowerWatts ?? activity.NormalizedPowerWatts;
+        activity.MaxTwentyMinutePowerWatts =
+            summary.MaxTwentyMinutePowerWatts ?? activity.MaxTwentyMinutePowerWatts;
+        activity.AverageVerticalOscillationMillimeters =
+            summary.AverageVerticalOscillationMillimeters ?? activity.AverageVerticalOscillationMillimeters;
+        activity.AverageGroundContactTimeMilliseconds =
+            summary.AverageGroundContactTimeMilliseconds ?? activity.AverageGroundContactTimeMilliseconds;
+        activity.AverageStrideLengthMeters =
+            summary.AverageStrideLengthMeters ?? activity.AverageStrideLengthMeters;
         activity.MinTemperatureCelsius = summary.MinTemperatureCelsius ?? activity.MinTemperatureCelsius;
         activity.MaxTemperatureCelsius = summary.MaxTemperatureCelsius ?? activity.MaxTemperatureCelsius;
         activity.AverageRespirationRate = summary.AverageRespirationRate ?? activity.AverageRespirationRate;
@@ -859,6 +869,8 @@ internal sealed class GarminProvider(
         activity.TrainingStressScore = summary.TrainingStressScore ?? activity.TrainingStressScore;
         activity.IntensityFactor = summary.IntensityFactor ?? activity.IntensityFactor;
         activity.Vo2Max = summary.Vo2Max ?? activity.Vo2Max;
+        activity.ParentExternalId = summary.ParentExternalId ?? activity.ParentExternalId;
+        activity.IsParent = summary.IsParent ?? activity.IsParent;
     }
 
     private static ActivityLap ToEntity(Activity activity, GarminActivityLapData lap) => new()

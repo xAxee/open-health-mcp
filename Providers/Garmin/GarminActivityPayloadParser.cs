@@ -19,6 +19,8 @@ internal static class GarminActivityPayloadParser
             GetInt32(activity, "maxHR"),
             GetDouble(activity, "elevationGain"),
             GetDouble(activity, "elevationLoss"),
+            GetDouble(activity, "minElevation"),
+            GetDouble(activity, "maxElevation"),
             averageSpeed,
             GetDouble(activity, "maxSpeed"),
             PaceFromSpeed(averageSpeed),
@@ -29,6 +31,10 @@ internal static class GarminActivityPayloadParser
             GetDouble(activity, "avgPower"),
             GetDouble(activity, "maxPower"),
             GetDouble(activity, "normPower"),
+            GetDouble(activity, "max20MinPower"),
+            GetDouble(activity, "avgVerticalOscillation"),
+            GetDouble(activity, "avgGroundContactTime"),
+            GetDouble(activity, "avgStrideLength"),
             GetDouble(activity, "minTemperature"),
             GetDouble(activity, "maxTemperature"),
             GetDouble(activity, "avgRespirationRate"),
@@ -42,7 +48,9 @@ internal static class GarminActivityPayloadParser
             GetDouble(activity, "trainingStressScore"),
             GetDouble(activity, "intensityFactor"),
             GetDouble(activity, "vO2MaxValue"),
-            GetBoolean(activity, "hasSplits"));
+            GetBoolean(activity, "hasSplits"),
+            GetString(activity, "parentId"),
+            GetBoolean(activity, "parent"));
     }
 
     public static IReadOnlyList<GarminActivityLapData> ParseLaps(JsonElement response)
@@ -234,6 +242,8 @@ internal sealed record GarminActivitySummaryData(
     int? MaxHeartRate,
     double? ElevationGainMeters,
     double? ElevationLossMeters,
+    double? MinElevationMeters,
+    double? MaxElevationMeters,
     double? AverageSpeedMetersPerSecond,
     double? MaxSpeedMetersPerSecond,
     double? AveragePaceSecondsPerKilometer,
@@ -244,6 +254,10 @@ internal sealed record GarminActivitySummaryData(
     double? AveragePowerWatts,
     double? MaxPowerWatts,
     double? NormalizedPowerWatts,
+    double? MaxTwentyMinutePowerWatts,
+    double? AverageVerticalOscillationMillimeters,
+    double? AverageGroundContactTimeMilliseconds,
+    double? AverageStrideLengthMeters,
     double? MinTemperatureCelsius,
     double? MaxTemperatureCelsius,
     double? AverageRespirationRate,
@@ -257,7 +271,9 @@ internal sealed record GarminActivitySummaryData(
     double? TrainingStressScore,
     double? IntensityFactor,
     double? Vo2Max,
-    bool? HasSplits);
+    bool? HasSplits,
+    string? ParentExternalId,
+    bool? IsParent);
 
 internal sealed record GarminActivityLapData(
     int LapIndex,

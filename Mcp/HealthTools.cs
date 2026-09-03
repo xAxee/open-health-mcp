@@ -122,13 +122,19 @@ public sealed class HealthTools
         IDbContextFactory<AppDbContext> dbContextFactory,
         CancellationToken cancellationToken,
         [Description("Optional normalized activity type.")] string? activityType = null,
-        [Description("Optional result limit; defaults to 50 and cannot exceed 200.")] int? limit = null)
+        [Description("Optional result limit; defaults to 50 and cannot exceed 200.")] int? limit = null,
+        [Description("Optional zero-based result offset; defaults to 0 and cannot exceed 100000.")] int? offset = null)
     {
         var (fromDate, toDate) = ParseRange(from, to, MaximumRangeDays);
         var effectiveLimit = limit ?? DefaultActivityLimit;
         if (effectiveLimit is < 1 or > MaximumActivityLimit)
         {
             throw new ArgumentException($"limit must be between 1 and {MaximumActivityLimit}.", nameof(limit));
+        }
+        var effectiveOffset = offset ?? 0;
+        if (effectiveOffset is < 0 or > 100000)
+        {
+            throw new ArgumentException("offset must be between 0 and 100000.", nameof(offset));
         }
 
         var fromTimestamp = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
@@ -146,6 +152,8 @@ public sealed class HealthTools
 
         return await query
             .OrderByDescending(item => item.StartedAt)
+            .ThenByDescending(item => item.Id)
+            .Skip(effectiveOffset)
             .Take(effectiveLimit)
             .Select(ToActivityListResult())
             .ToListAsync(cancellationToken);
@@ -259,16 +267,14 @@ public sealed class HealthTools
             return new ActivityHeartRateZonesResult(false, normalizedSource, activityId, false, []);
         }
 
-        var zones = await dbContext.ActivityHeartRateZones
+        var storedZones = await dbContext.ActivityHeartRateZones
             .AsNoTracking()
             .Where(item => item.ActivityId == activity.Id)
             .OrderBy(item => item.ZoneNumber)
-            .Select(item => new ActivityHeartRateZoneResult(
-                item.ZoneNumber,
-                item.TimeSeconds,
-                item.Percentage,
-                item.LowBoundaryBpm))
+            .Select(item => new ActivityZoneRow(
+                item.ZoneNumber, item.TimeSeconds, item.Percentage, item.LowBoundaryBpm))
             .ToListAsync(cancellationToken);
+        var zones = ActivityZoneMapper.Map(storedZones);
 
         return new ActivityHeartRateZonesResult(
             true,
@@ -712,7 +718,17 @@ public sealed class HealthTools
             item.Vo2Max,
             item.LapsSyncedAt != null,
             item.HeartRateZonesSyncedAt != null,
-            item.StreamsSyncedAt != null);
+            item.StreamsSyncedAt != null,
+            item.MinElevationMeters,
+            item.MaxElevationMeters,
+            item.MaxTwentyMinutePowerWatts,
+            item.AverageVerticalOscillationMillimeters,
+            item.AverageGroundContactTimeMilliseconds,
+            item.AverageStrideLengthMeters,
+            item.ParentExternalId,
+            item.IsParent,
+            new MetricSourceMetadata("garmin_api"),
+            new MetricSourceMetadata("derived_by_openhealth", "pace-from-average-speed-v1"));
 
     private static void ValidateActivityId(string activityId)
     {

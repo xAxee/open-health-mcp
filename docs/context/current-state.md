@@ -8,4 +8,6 @@ The Fitness AI parity audit is recorded in `docs/fitness-ai-gap-analysis.md`. Ca
 
 Canonical `get_day_series` and `get_activity_series` MCP tools are implemented alongside compatibility tools. They query indexed canonical tables, support range/field selection, interval aggregation, deterministic response-only downsampling, and explicit source/resolution metadata.
 
-Current validation: production build passes; 24 standard xUnit tests pass. The active series integration test also passes on PostgreSQL 17. Both new migrations were applied to PostgreSQL 17, including an upgrade test that retained historical daily and raw records.
+Activity summaries now include confirmed min/max elevation, maximum 20-minute power, running dynamics, and Garmin multisport parent metadata. Activity listing supports bounded offset pagination. Garmin HR-zone low boundaries remain authoritative; high boundaries are derived only from the next Garmin floor and explicitly labelled.
+
+Current validation: production build passes; 26 standard xUnit tests pass. Active integration and migration tests pass on PostgreSQL 17, including upgrades retaining historical daily, raw, and activity records.

@@ -38,10 +38,18 @@ public sealed class GarminActivityPayloadParserTests
         Assert.Equal(228, result.AveragePowerWatts);
         Assert.Equal(615, result.MaxPowerWatts);
         Assert.Equal(251, result.NormalizedPowerWatts);
+        Assert.Equal(310, result.MaxTwentyMinutePowerWatts);
+        Assert.Equal(612.4, result.MinElevationMeters);
+        Assert.Equal(1894.1, result.MaxElevationMeters);
+        Assert.Equal(82.5, result.AverageVerticalOscillationMillimeters);
+        Assert.Equal(265, result.AverageGroundContactTimeMilliseconds);
+        Assert.Equal(0.91, result.AverageStrideLengthMeters);
         Assert.Equal(4.1, result.AerobicTrainingEffect);
         Assert.Equal(1.2, result.AnaerobicTrainingEffect);
         Assert.Equal(286, result.TrainingLoad);
         Assert.Equal(52, result.Vo2Max);
+        Assert.Equal("899999999", result.ParentExternalId);
+        Assert.False(result.IsParent);
     }
 
     [Fact]
