@@ -1,5 +1,9 @@
 {
   "calendarDate": "2026-08-31",
+  "wellnessStartTimeGmt": "2026-08-30T22:00:00.000Z",
+  "wellnessStartTimeLocal": "2026-08-31T00:00:00",
+  "wellnessEndTimeGmt": "2026-08-31T21:59:59.000Z",
+  "wellnessEndTimeLocal": "2026-08-31T23:59:59",
   "totalSteps": 12345,
   "totalDistanceMeters": 9876,
   "highlyActiveSeconds": 1800,
@@ -18,7 +22,7 @@
   "activeKilocalories": 775,
   "bmrKilocalories": 1900,
   "floorsAscended": 12,
-  "floorsGoal": 10,
+  "userFloorsAscendedGoal": 10,
   "dailyStepGoal": 10000,
   "moderateIntensityMinutes": 18,
   "vigorousIntensityMinutes": 11,

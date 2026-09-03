@@ -7,6 +7,7 @@ public sealed class HealthMetricSample
     public required string Metric { get; set; }
     public DateOnly LocalDate { get; set; }
     public DateTimeOffset TimestampUtc { get; set; }
+    public DateTimeOffset? EndTimestampUtc { get; set; }
     public double? ValueNumeric { get; set; }
     public string? ValueText { get; set; }
     public required string Unit { get; set; }

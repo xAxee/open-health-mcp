@@ -1,0 +1,21 @@
+{
+  "calendarDate": "2026-08-31",
+  "startTimestampGMT": "2026-08-30T22:00:00.000Z",
+  "endTimestampGMT": "2026-08-31T21:59:59.000Z",
+  "startTimestampLocal": "2026-08-31T00:00:00",
+  "endTimestampLocal": "2026-08-31T23:59:59",
+  "lowestRespirationValue": 10.4,
+  "highestRespirationValue": 19.1,
+  "avgWakingRespirationValue": 14.2,
+  "avgSleepRespirationValue": 12.9,
+  "respirationValueDescriptorsDTOList": [
+    { "index": 0, "key": "timestamp" },
+    { "index": 1, "key": "respirationValue" }
+  ],
+  "respirationValuesArray": [
+    [1788134400000, 13.8],
+    [1788134700000, 14.1],
+    [1788135000000, null],
+    [1788135300000, 14.4]
+  ]
+}

@@ -68,21 +68,21 @@ Source inspection at the exact NuGet 0.10.0 commit (`e8e811c`) confirms client m
 | Feature | Status | Current source and semantics | Gap / action |
 | --- | --- | --- | --- |
 | Stress average | `AVAILABLE` | Garmin `averageStressLevel` | Preserve. |
-| Stress maximum | `MISSING` | Not normalized | Parse only a confirmed provider field or measured series. |
-| Stress qualifier | `MISSING` | Not normalized | Garmin qualifier has priority over local categorization. |
-| Rest/low/medium/high/activity durations | `MISSING` | Raw daily-stress JSON retained | Add confirmed provider durations. |
-| Stress percentages | `DERIVED` | Not implemented | Derive from durations and identify as `derived_by_openhealth`. |
-| Stress series | `AVAILABLE` | Garmin daily-stress descriptor arrays | Existing JSONB day document; currently retained only 365 days. |
+| Stress maximum | `AVAILABLE` | Garmin daily `maxStressLevel` | Provider value. |
+| Stress qualifier | `AVAILABLE` | Garmin daily `stressQualifier` | Provider category; no local replacement. |
+| Rest/low/medium/high/activity durations | `AVAILABLE` | Garmin daily duration fields | Provider values in seconds. |
+| Stress percentages | `AVAILABLE` | Garmin daily percentage fields | Provider values; OpenHealth does not recalculate them. |
+| Stress series | `AVAILABLE` | Garmin daily-stress descriptor arrays | Persisted without an artificial local retention cutoff. |
 | Body Battery min/max | `AVAILABLE` | Garmin daily summary | Preserve. |
-| Body Battery charged/drained/high/low | `MISSING` | Not normalized | Add confirmed payload values. |
-| Body Battery series | `AVAILABLE` | Garmin daily-stress descriptor arrays | Existing JSONB day document; remove artificial 365-day deletion. |
+| Body Battery charged/drained/high/low | `PARTIAL` | Charged, drained, high, and low are normalized from Garmin daily values | Provider high/low remain compatible min/max fields. |
+| Body Battery series | `AVAILABLE` | Garmin daily-stress descriptor arrays | Persisted as JSONB and indexed canonical samples without retention deletion. |
 
 ## HRV
 
 | Feature | Status | Current source and semantics | Gap / action |
 | --- | --- | --- | --- |
-| Last-night average | `AVAILABLE` | Garmin HRV `lastNightAvg`, currently named `Hrv` | Add explicit name while retaining old field. |
-| Five-minute high | `MISSING` | Not normalized | Parse confirmed HRV summary field. |
+| Last-night average | `AVAILABLE` | Garmin HRV `lastNightAvg`, compatible field `Hrv` plus explicit details | Provider value. |
+| Five-minute high | `AVAILABLE` | Garmin HRV `lastNight5MinHigh` | Provider value. |
 | Minimum/maximum | `MISSING` | No measured HRV series persisted | Derive only from actual samples and label accordingly. |
 | Reading count/duration | `MISSING` | Not stored | Add sample count and measurement duration. |
 | Sleep/start timestamp | `MISSING` | Not stored | Parse UTC/local basis from confirmed payload. |
@@ -92,26 +92,26 @@ Source inspection at the exact NuGet 0.10.0 commit (`e8e811c`) confirms client m
 
 | Feature | Status | Current source and semantics | Gap / action |
 | --- | --- | --- | --- |
-| Start/end UTC and local | `MISSING` | Raw sleep JSON only | Normalize both time bases and timezone metadata. |
+| Start/end UTC and local | `AVAILABLE` | Garmin sleep GMT/local timestamps | UTC, local wall clock, and derived offset are kept distinct. |
 | Duration | `AVAILABLE` | Garmin `dailySleepDTO.sleepTimeSeconds` | Preserve. |
 | Deep/light/REM/awake | `AVAILABLE` | Garmin `dailySleepDTO` | Preserve. |
-| Unmeasurable stage duration | `MISSING` | Not normalized | Add confirmed payload field. |
+| Unmeasurable stage duration | `AVAILABLE` | Garmin sleep payload | Provider value. |
 | Sleep score | `AVAILABLE` | Garmin `sleepScores.overall.value` | Preserve. |
 | Overall qualifier | `MISSING` | Not normalized | Store provider qualifier. |
 | Extensible subscores | `MISSING` | Raw sleep response retained | Add normalized common fields plus JSONB subscore payload. |
-| Sleep-stage series | `MISSING` | Not parsed | Preserve exact measured stage intervals. |
-| Naps | `TODO` | No confirmed source in current code | Implement only after response capture and fixture. |
+| Sleep-stage series | `PARTIAL` | Exact Garmin intervals and numeric provider stage codes are stored | Text labels await a confirmed mapping. |
+| Naps | `AVAILABLE` | Garmin `napTimeSeconds` | Aggregate duration is normalized; separate nap intervals are not confirmed. |
 
 ## SpO2 and respiration
 
 | Feature | Status | Current source and semantics | Gap / action |
 | --- | --- | --- | --- |
 | Average SpO2 | `AVAILABLE` | Garmin daily `averageSpo2` | Preserve. |
-| SpO2 min/max/count/window | `MISSING` | Not normalized | Parse confirmed response values/measurements. |
+| SpO2 min/max/count/window | `PARTIAL` | Minimum and measurement window are normalized | Confirmed response has no maximum/count or sample array. |
 | SpO2 series | `MISSING` | Not persisted | Preserve raw samples without interpolation. |
 | Average waking respiration | `AVAILABLE` | Garmin `avgWakingRespirationValue` | Preserve. |
-| Sleep respiration/min/max | `MISSING` | Not normalized | Add from confirmed sleep/wellness response. |
-| Respiration series | `MISSING` | Activity respiration only | Add measured daily/sleep points when confirmed. |
+| Sleep respiration/min/max | `AVAILABLE` | Garmin sleep and respiration responses | Provider values. |
+| Respiration series | `AVAILABLE` | Garmin daily respiration and sleep epoch arrays | Measured points only; no interpolation. |
 
 ## Activities
 

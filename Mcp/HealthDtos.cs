@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace OpenHealthMCP.Mcp;
 
 public sealed record DayResult(
@@ -23,7 +25,107 @@ public sealed record DayResult(
     int? RemSleepSeconds,
     int? AwakeSleepSeconds,
     double? AverageRespirationRate,
-    double? AverageSpo2);
+    double? AverageSpo2,
+    double? DistanceMeters,
+    int? ActiveSeconds,
+    int? UtcOffsetMinutes,
+    string? Timezone,
+    DayCaloriesResult CaloriesDetails,
+    DayGoalsResult Goals,
+    DayIntensityResult Intensity,
+    DayStressResult StressDetails,
+    DayBodyBatteryResult BodyBatteryDetails,
+    DayHrvResult HrvDetails,
+    DaySleepResult SleepDetails,
+    DaySpo2Result Spo2Details,
+    DayRespirationResult RespirationDetails,
+    DaySourceMetadata Sources);
+
+public sealed record DayCaloriesResult(int? TotalCalories, int? ActiveCalories, int? BmrCalories);
+
+public sealed record DayGoalsResult(int? StepsGoal, int? FloorsGoal, int? IntensityGoal);
+
+public sealed record DayIntensityResult(
+    int? ModerateMinutes,
+    int? VigorousMinutes,
+    int? TotalMinutes,
+    string VigorousCounting,
+    MetricSourceMetadata TotalSource);
+
+public sealed record DayStressResult(
+    double? Average,
+    double? Maximum,
+    string? Qualifier,
+    int? RestSeconds,
+    int? LowSeconds,
+    int? MediumSeconds,
+    int? HighSeconds,
+    int? ActivitySeconds,
+    double? RestPercentage,
+    double? LowPercentage,
+    double? MediumPercentage,
+    double? HighPercentage);
+
+public sealed record DayBodyBatteryResult(
+    int? Minimum,
+    int? Maximum,
+    int? Charged,
+    int? Drained,
+    int? MostRecent);
+
+public sealed record DayHrvResult(
+    double? LastNightAverageMs,
+    double? FiveMinuteHighMs,
+    string? Status,
+    DateTimeOffset? CreatedAt,
+    int? ReadingsCount,
+    MetricSourceMetadata Source);
+
+public sealed record DaySleepResult(
+    DateTimeOffset? StartUtc,
+    DateTimeOffset? EndUtc,
+    DateTime? StartLocal,
+    DateTime? EndLocal,
+    int? DurationSeconds,
+    int? NapDurationSeconds,
+    int? DeepSeconds,
+    int? LightSeconds,
+    int? RemSeconds,
+    int? AwakeSeconds,
+    int? UnmeasurableSeconds,
+    double? Score,
+    string? Qualifier,
+    int? AwakeCount,
+    double? AverageStress,
+    JsonElement? SubScores);
+
+public sealed record DaySpo2Result(
+    double? Average,
+    double? Minimum,
+    double? Maximum,
+    double? Latest,
+    double? SleepAverage,
+    int? ReadingsCount,
+    DateTimeOffset? WindowStartUtc,
+    DateTimeOffset? WindowEndUtc);
+
+public sealed record DayRespirationResult(
+    double? WakingAverage,
+    double? SleepAverage,
+    double? Minimum,
+    double? Maximum);
+
+public sealed record DaySourceMetadata(
+    string Daily,
+    MetricSourceMetadata AverageHeartRate,
+    string Sleep,
+    string Hrv,
+    string Stress,
+    string BodyBattery,
+    string Spo2,
+    string Respiration);
+
+public sealed record MetricSourceMetadata(string Source, string? Algorithm = null);
 
 public sealed record DayLookupResult(bool Found, DayResult? Data);
 

@@ -27,6 +27,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.Source, x.Date }).IsUnique();
             entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.StressQualifier).HasMaxLength(100);
+            entity.Property(x => x.HrvStatus).HasMaxLength(100);
+            entity.Property(x => x.SleepQualifier).HasMaxLength(100);
+            entity.Property(x => x.SleepSubScoresJson).HasColumnType("jsonb");
+            entity.Property(x => x.SleepStartLocal).HasColumnType("timestamp without time zone");
+            entity.Property(x => x.SleepEndLocal).HasColumnType("timestamp without time zone");
+            entity.Property(x => x.WellnessStartLocal).HasColumnType("timestamp without time zone");
+            entity.Property(x => x.WellnessEndLocal).HasColumnType("timestamp without time zone");
         });
 
         modelBuilder.Entity<Activity>(entity =>

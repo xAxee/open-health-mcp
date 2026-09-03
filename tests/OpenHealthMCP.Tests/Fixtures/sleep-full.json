@@ -27,5 +27,10 @@
     { "startGMT": "2026-08-30T21:50:00.000Z", "endGMT": "2026-08-30T23:15:00.000Z", "activityLevel": 1 },
     { "startGMT": "2026-08-30T23:15:00.000Z", "endGMT": "2026-08-31T01:20:00.000Z", "activityLevel": 2 },
     { "startGMT": "2026-08-31T01:20:00.000Z", "endGMT": "2026-08-31T02:35:00.000Z", "activityLevel": 3 }
+  ],
+  "wellnessEpochRespirationDataDTOList": [
+    { "startTimeGMT": 1788125700000, "respirationValue": 13.2 },
+    { "startTimeGMT": 1788126000000, "respirationValue": 12.8 },
+    { "startTimeGMT": 1788126300000, "respirationValue": 13.5 }
   ]
 }

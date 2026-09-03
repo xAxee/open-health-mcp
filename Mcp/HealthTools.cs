@@ -30,36 +30,88 @@ public sealed class HealthTools
         var normalizedSource = NormalizeSource(source);
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var result = await dbContext.DailyMetrics
+        var item = await dbContext.DailyMetrics
             .AsNoTracking()
             .Where(item => item.Source == normalizedSource && item.Date == parsedDate)
-            .Select(item => new DayResult(
-                item.Source,
-                item.Date,
-                item.Steps,
-                item.RestingHeartRate,
-                item.AverageHeartRate,
-                item.MinHeartRate,
-                item.MaxHeartRate,
-                item.Hrv,
-                item.StressAverage,
-                item.BodyBatteryMin,
-                item.BodyBatteryMax,
-                item.SleepScore,
-                item.Calories,
-                item.ActiveCalories,
-                item.ModerateIntensityMinutes,
-                item.VigorousIntensityMinutes,
-                item.SleepDurationSeconds,
-                item.DeepSleepSeconds,
-                item.LightSleepSeconds,
-                item.RemSleepSeconds,
-                item.AwakeSleepSeconds,
-                item.AverageRespirationRate,
-                item.AverageSpo2))
             .SingleOrDefaultAsync(cancellationToken);
 
-        return new DayLookupResult(result is not null, result);
+        return new DayLookupResult(item is not null, item is null ? null : ToDayResult(item));
+    }
+
+    private static DayResult ToDayResult(DailyMetric item) => new(
+        item.Source,
+        item.Date,
+        item.Steps,
+        item.RestingHeartRate,
+        item.AverageHeartRate,
+        item.MinHeartRate,
+        item.MaxHeartRate,
+        item.Hrv,
+        item.StressAverage,
+        item.BodyBatteryMin,
+        item.BodyBatteryMax,
+        item.SleepScore,
+        item.Calories,
+        item.ActiveCalories,
+        item.ModerateIntensityMinutes,
+        item.VigorousIntensityMinutes,
+        item.SleepDurationSeconds,
+        item.DeepSleepSeconds,
+        item.LightSleepSeconds,
+        item.RemSleepSeconds,
+        item.AwakeSleepSeconds,
+        item.AverageRespirationRate,
+        item.AverageSpo2,
+        item.DistanceMeters,
+        item.ActiveSeconds,
+        item.UtcOffsetMinutes,
+        null,
+        new DayCaloriesResult(item.Calories, item.ActiveCalories, item.BmrCalories),
+        new DayGoalsResult(item.StepsGoal, item.FloorsGoal, item.IntensityGoal),
+        new DayIntensityResult(
+            item.ModerateIntensityMinutes,
+            item.VigorousIntensityMinutes,
+            item.TotalIntensityMinutes,
+            "vigorous_minutes_count_twice",
+            new MetricSourceMetadata("derived_by_openhealth", "garmin-intensity-total-v1")),
+        new DayStressResult(
+            item.StressAverage, item.StressMax, item.StressQualifier,
+            item.RestStressSeconds, item.LowStressSeconds, item.MediumStressSeconds,
+            item.HighStressSeconds, item.ActivityStressSeconds,
+            item.RestStressPercentage, item.LowStressPercentage,
+            item.MediumStressPercentage, item.HighStressPercentage),
+        new DayBodyBatteryResult(
+            item.BodyBatteryMin, item.BodyBatteryMax, item.BodyBatteryCharged,
+            item.BodyBatteryDrained, item.BodyBatteryMostRecent),
+        new DayHrvResult(
+            item.Hrv, item.HrvFiveMinuteHigh, item.HrvStatus, item.HrvCreatedAt,
+            null, new MetricSourceMetadata("garmin_api")),
+        new DaySleepResult(
+            item.SleepStartUtc, item.SleepEndUtc, item.SleepStartLocal, item.SleepEndLocal,
+            item.SleepDurationSeconds, item.NapDurationSeconds, item.DeepSleepSeconds,
+            item.LightSleepSeconds, item.RemSleepSeconds, item.AwakeSleepSeconds,
+            item.UnmeasurableSleepSeconds, item.SleepScore, item.SleepQualifier,
+            item.SleepAwakeCount, item.AverageSleepStress, ParseOptionalJson(item.SleepSubScoresJson)),
+        new DaySpo2Result(
+            item.AverageSpo2, item.MinimumSpo2, null, item.LatestSpo2,
+            item.AverageSleepSpo2, null, item.Spo2WindowStartUtc, item.Spo2WindowEndUtc),
+        new DayRespirationResult(
+            item.AverageRespirationRate, item.AverageSleepRespirationRate,
+            item.MinimumRespirationRate, item.MaximumRespirationRate),
+        new DaySourceMetadata(
+            "garmin_api",
+            new MetricSourceMetadata("derived_by_openhealth", "measured-series-average-v1"),
+            "garmin_api", "garmin_api", "garmin_api", "garmin_api", "garmin_api", "garmin_api"));
+
+    private static JsonElement? ParseOptionalJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
     }
 
     [McpServerTool(Name = "get_activities", ReadOnly = true, Idempotent = true, UseStructuredContent = true)]
