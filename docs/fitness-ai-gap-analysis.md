@@ -197,12 +197,12 @@ Source inspection at the exact NuGet 0.10.0 commit (`e8e811c`) confirms client m
 
 ## MCP contract gaps
 
-Current tools are `get_day`, `get_activities`, `get_activity`, `get_activity_laps`, `get_activity_hr_zones`, `get_activity_streams`, `get_daily_timeline`, `get_activity_summary`, `get_trend`, and `compare_periods`.
+Current tools are `get_day`, `get_day_series`, `get_activities`, `get_activity`, `get_activity_laps`, `get_activity_hr_zones`, `get_activity_streams`, `get_activity_series`, `get_daily_timeline`, `get_activity_summary`, `get_trend`, and `compare_periods`.
 
 Backward-compatible additions planned:
 
-- `get_day_series` — multi-metric daily series with range, interval, `maxPoints`, and explicit downsampling/time-basis metadata.
-- `get_activity_series` — preferred canonical name; keep `get_activity_streams` as a compatibility alias.
+- `get_day_series` — implemented multi-metric daily series with range, interval, `maxPoints`, and explicit downsampling/time-basis metadata.
+- `get_activity_series` — implemented canonical endpoint; `get_activity_streams` remains a compatibility tool.
 - `get_user_profile` — safe provider connection, timezone, confirmed fitness profile values, capabilities, and last successful sync.
 - `get_body_composition` — sparse measurements.
 - `get_blood_pressure` — only after provider support is confirmed.

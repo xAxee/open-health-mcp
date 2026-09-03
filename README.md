@@ -15,7 +15,7 @@ OpenHealthMCP does not contain or call an LLM. It is designed for exactly one se
 - Original Garmin JSON response records preserved as PostgreSQL `jsonb`.
 - Automatic refresh of recent days with a configurable interval and lookback.
 - Authenticated historical backfill processed in bounded chunks.
-- Remote Streamable HTTP MCP server with ten provider-neutral, read-only tools.
+- Remote Streamable HTTP MCP server with twelve provider-neutral, read-only tools.
 - Constant-time Bearer token authentication.
 - Automatic EF Core migrations with startup retry.
 - Docker Compose deployment with private PostgreSQL networking and persistent volumes.
@@ -314,6 +314,8 @@ Available tools:
 | `get_activity_hr_zones` | Return provider time in heart-rate zones for one stored activity. |
 | `get_activity_streams` | Return selected, bounded activity stream metrics with elapsed time. |
 | `get_daily_timeline` | Return bounded heart-rate, stress, or Body Battery samples for one day. |
+| `get_day_series` | Return one or more indexed daily series with UTC bounds, interval aggregation, source metadata, and transparent downsampling. |
+| `get_activity_series` | Return canonical activity samples with field selection, elapsed bounds, interval aggregation, and resolution metadata. |
 | `get_activity_summary` | Return activity totals with optional type filter and daily, weekly, or monthly groups. |
 | `get_trend` | Return deterministic statistics and daily samples for a supported metric. |
 | `compare_periods` | Compare averages, absolute difference, percentage change, and sample counts. |
@@ -363,6 +365,8 @@ MCP tools query PostgreSQL only. They do not contact Garmin, modify health data,
 `get_activity_laps` and `get_activity_hr_zones` return `found`, `source`, `activityId`, `synchronized`, and an ordered collection. `synchronized=false` means the optional Garmin enrichment has not completed. `synchronized=true` with an empty collection means no entries were returned or expected. HR-zone percentages are calculated only from Garmin's `secsInZone` values, using their sum as the denominator; zone boundaries are returned only when Garmin provides `zoneLowBoundary` and are never inferred.
 
 `get_activity_streams` accepts a comma-separated metric selection, elapsed-time bounds, and `maxPoints` from 2 through 2000 (default 500). `get_daily_timeline` uses the same point limits. When a stored series exceeds the limit, deterministic evenly spaced downsampling retains its first and last points. `get_activity_summary` supports `none`, `daily`, `weekly`, and `monthly` grouping, rejects requests that would span more than 400 result periods, keeps sums `null` when no activity supplied the metric, and duration-weights average heart rate.
+
+`get_day_series` is the canonical multi-metric daily endpoint. It supports `heart_rate`, `stress`, `body_battery`, `hrv`, `spo2`, `respiration`, `sleep_respiration`, and `sleep_stage`, although a metric is returned only when measured samples were synchronized. `get_activity_series` supports heart rate, speed, pace, elevation, cadence, power, sensor temperature, distance, respiration, and coordinates when present. Both tools accept `interval` and `maxPoints` up to 5000 and report original/returned counts, requested/effective resolution, aggregation, downsampling, and time basis. Interval buckets never interpolate missing samples; scalar signals use measured-sample averages, cumulative distance and coordinates use the last measured value, and sleep-stage buckets retain a measured provider stage code.
 
 ## Security
 
