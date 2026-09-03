@@ -1,0 +1,8 @@
+{
+  "id": 100001,
+  "userData": {
+    "vo2MaxRunning": 52.0,
+    "vo2MaxCycling": 49.0,
+    "intensityMinutesCalcMethod": "AUTOMATIC"
+  }
+}

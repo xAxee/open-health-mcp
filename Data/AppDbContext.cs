@@ -10,9 +10,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<ActivityLap> ActivityLaps => Set<ActivityLap>();
     public DbSet<ActivityHeartRateZone> ActivityHeartRateZones => Set<ActivityHeartRateZone>();
     public DbSet<ActivityStream> ActivityStreams => Set<ActivityStream>();
+    public DbSet<ActivitySample> ActivitySamples => Set<ActivitySample>();
     public DbSet<DailyTimeline> DailyTimelines => Set<DailyTimeline>();
+    public DbSet<HealthMetricSample> HealthMetricSamples => Set<HealthMetricSample>();
     public DbSet<RawProviderData> RawProviderData => Set<RawProviderData>();
     public DbSet<SyncState> SyncStates => Set<SyncState>();
+    public DbSet<UserFitnessProfile> UserFitnessProfiles => Set<UserFitnessProfile>();
+    public DbSet<ConfiguredHeartRateZone> ConfiguredHeartRateZones => Set<ConfiguredHeartRateZone>();
+    public DbSet<BodyCompositionMeasurement> BodyCompositionMeasurements => Set<BodyCompositionMeasurement>();
+    public DbSet<BloodPressureMeasurement> BloodPressureMeasurements => Set<BloodPressureMeasurement>();
     public DbSet<OAuthClient> OAuthClients => Set<OAuthClient>();
     public DbSet<OAuthAuthorizationCode> OAuthAuthorizationCodes => Set<OAuthAuthorizationCode>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
@@ -25,6 +31,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.Source, x.Date }).IsUnique();
             entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.StressQualifier).HasMaxLength(100);
+            entity.Property(x => x.HrvStatus).HasMaxLength(100);
+            entity.Property(x => x.SleepQualifier).HasMaxLength(100);
+            entity.Property(x => x.SleepSubScoresJson).HasColumnType("jsonb");
+            entity.Property(x => x.SleepStartLocal).HasColumnType("timestamp without time zone");
+            entity.Property(x => x.SleepEndLocal).HasColumnType("timestamp without time zone");
+            entity.Property(x => x.WellnessStartLocal).HasColumnType("timestamp without time zone");
+            entity.Property(x => x.WellnessEndLocal).HasColumnType("timestamp without time zone");
         });
 
         modelBuilder.Entity<Activity>(entity =>
@@ -39,6 +53,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.Name).HasMaxLength(500);
             entity.Property(x => x.ActivityType).HasMaxLength(100);
             entity.Property(x => x.CadenceUnit).HasMaxLength(30);
+            entity.Property(x => x.ParentExternalId).HasMaxLength(200);
             entity.HasMany(x => x.Laps)
                 .WithOne(x => x.Activity)
                 .HasForeignKey(x => x.ActivityId)
@@ -51,6 +66,19 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithOne(x => x.Activity)
                 .HasForeignKey<ActivityStream>(x => x.ActivityId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(x => x.Samples)
+                .WithOne(x => x.Activity)
+                .HasForeignKey(x => x.ActivityId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ActivitySample>(entity =>
+        {
+            entity.ToTable("activity_samples");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ActivityId, x.ElapsedSeconds }).IsUnique();
+            entity.HasIndex(x => new { x.ActivityId, x.TimestampUtc });
+            entity.Property(x => x.SourceType).HasMaxLength(30);
         });
 
         modelBuilder.Entity<ActivityLap>(entity =>
@@ -88,14 +116,31 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.Samples).HasColumnType("jsonb");
         });
 
+        modelBuilder.Entity<HealthMetricSample>(entity =>
+        {
+            entity.ToTable("health_metric_samples");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.Metric, x.TimestampUtc }).IsUnique();
+            entity.HasIndex(x => new { x.Source, x.LocalDate, x.Metric });
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.Metric).HasMaxLength(50);
+            entity.Property(x => x.Unit).HasMaxLength(30);
+            entity.Property(x => x.SourceType).HasMaxLength(30);
+            entity.Property(x => x.Quality).HasMaxLength(50);
+        });
+
         modelBuilder.Entity<RawProviderData>(entity =>
         {
             entity.ToTable("raw_provider_data");
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => new { x.Source, x.DataType, x.ExternalId }).IsUnique();
+            entity.HasIndex(x => new { x.Source, x.DataType, x.ExternalId, x.PayloadHash }).IsUnique();
+            entity.HasIndex(x => new { x.Source, x.DataType, x.ExternalId, x.FetchedAt });
             entity.Property(x => x.Source).HasMaxLength(50);
             entity.Property(x => x.DataType).HasMaxLength(50);
             entity.Property(x => x.ExternalId).HasMaxLength(200);
+            entity.Property(x => x.Endpoint).HasMaxLength(1000);
+            entity.Property(x => x.PayloadHash).HasMaxLength(64);
+            entity.Property(x => x.ParserVersion).HasMaxLength(30).HasDefaultValue("garmin-v0");
             entity.Property(x => x.Payload).HasColumnType("jsonb");
         });
 
@@ -106,6 +151,51 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(x => x.Source).IsUnique();
             entity.Property(x => x.Source).HasMaxLength(50);
             entity.Property(x => x.LastError).HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<UserFitnessProfile>(entity =>
+        {
+            entity.ToTable("user_fitness_profiles");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.Source).IsUnique();
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.ProviderProfileId).HasMaxLength(200);
+        });
+
+        modelBuilder.Entity<ConfiguredHeartRateZone>(entity =>
+        {
+            entity.ToTable("configured_heart_rate_zones");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.Sport }).IsUnique();
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.Sport).HasMaxLength(100);
+            entity.Property(x => x.TrainingMethod).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<BodyCompositionMeasurement>(entity =>
+        {
+            entity.ToTable("body_composition_measurements");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.ExternalId }).IsUnique();
+            entity.HasIndex(x => new { x.Source, x.LocalDate });
+            entity.HasIndex(x => new { x.Source, x.TimestampUtc });
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.ExternalId).HasMaxLength(200);
+            entity.Property(x => x.SourceType).HasMaxLength(30);
+        });
+
+        modelBuilder.Entity<BloodPressureMeasurement>(entity =>
+        {
+            entity.ToTable("blood_pressure_measurements");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.ExternalId }).IsUnique();
+            entity.HasIndex(x => new { x.Source, x.LocalDate });
+            entity.HasIndex(x => new { x.Source, x.TimestampUtc });
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.ExternalId).HasMaxLength(200);
+            entity.Property(x => x.ProviderSourceType).HasMaxLength(100);
+            entity.Property(x => x.SourceType).HasMaxLength(30);
+            entity.Property(x => x.TimestampLocal).HasColumnType("timestamp without time zone");
         });
 
         modelBuilder.Entity<OAuthClient>(entity =>

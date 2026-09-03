@@ -1,0 +1,32 @@
+{
+  "lapDTOs": [
+    {
+      "lapIndex": 1,
+      "startTimeGMT": "2026-08-29T06:15:00.000Z",
+      "duration": 1800,
+      "elapsedDuration": 1950,
+      "movingDuration": 1740,
+      "distance": 2450,
+      "averageSpeed": 1.408,
+      "maxSpeed": 3.2,
+      "calories": 240,
+      "averageHR": 121,
+      "maxHR": 148,
+      "elevationGain": 310,
+      "elevationLoss": 15,
+      "minElevation": 612,
+      "maxElevation": 908,
+      "averageRunCadence": 104,
+      "maxRunCadence": 143,
+      "avgPower": 215,
+      "maxPower": 510,
+      "averageTemperature": 9.5,
+      "minTemperature": 7,
+      "maxTemperature": 12,
+      "avgRespirationRate": 24.2,
+      "minRespirationRate": 14,
+      "maxRespirationRate": 40,
+      "intensityType": "ACTIVE"
+    }
+  ]
+}

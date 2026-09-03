@@ -1,0 +1,13 @@
+{
+  "activityId": 900000004,
+  "activityName": "Sanitized indoor climbing",
+  "activityType": { "typeKey": "indoor_climbing" },
+  "startTimeGMT": "2026-08-26 18:30:00",
+  "duration": 5400,
+  "elapsedDuration": 5700,
+  "movingDuration": 2900,
+  "calories": 620,
+  "averageHR": 118,
+  "maxHR": 176,
+  "elevationGain": 360
+}

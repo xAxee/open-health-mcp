@@ -33,13 +33,13 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore
-        run: dotnet restore OpenHealthMCP.csproj
+        run: dotnet restore tests/OpenHealthMCP.Tests/OpenHealthMCP.Tests.csproj
 
       - name: Build
         run: dotnet build OpenHealthMCP.csproj --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test OpenHealthMCP.csproj --configuration Release --no-build
+        run: dotnet test tests/OpenHealthMCP.Tests/OpenHealthMCP.Tests.csproj --configuration Release --no-restore
 
       - name: Validate production Compose
         run: >-

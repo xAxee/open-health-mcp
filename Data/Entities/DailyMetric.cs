@@ -5,27 +5,75 @@ public sealed class DailyMetric
     public long Id { get; set; }
     public required string Source { get; set; }
     public DateOnly Date { get; set; }
+    public int? UtcOffsetMinutes { get; set; }
     public int? Steps { get; set; }
+    public double? DistanceMeters { get; set; }
+    public int? ActiveSeconds { get; set; }
     public int? RestingHeartRate { get; set; }
     public int? AverageHeartRate { get; set; }
     public int? MinHeartRate { get; set; }
     public int? MaxHeartRate { get; set; }
     public double? Hrv { get; set; }
+    public double? HrvFiveMinuteHigh { get; set; }
+    public string? HrvStatus { get; set; }
+    public DateTimeOffset? HrvCreatedAt { get; set; }
     public double? StressAverage { get; set; }
+    public double? StressMax { get; set; }
+    public string? StressQualifier { get; set; }
+    public int? RestStressSeconds { get; set; }
+    public int? LowStressSeconds { get; set; }
+    public int? MediumStressSeconds { get; set; }
+    public int? HighStressSeconds { get; set; }
+    public int? ActivityStressSeconds { get; set; }
+    public double? RestStressPercentage { get; set; }
+    public double? LowStressPercentage { get; set; }
+    public double? MediumStressPercentage { get; set; }
+    public double? HighStressPercentage { get; set; }
     public int? BodyBatteryMin { get; set; }
     public int? BodyBatteryMax { get; set; }
+    public int? BodyBatteryCharged { get; set; }
+    public int? BodyBatteryDrained { get; set; }
+    public int? BodyBatteryMostRecent { get; set; }
     public double? SleepScore { get; set; }
+    public string? SleepQualifier { get; set; }
+    public DateTimeOffset? SleepStartUtc { get; set; }
+    public DateTimeOffset? SleepEndUtc { get; set; }
+    public DateTime? SleepStartLocal { get; set; }
+    public DateTime? SleepEndLocal { get; set; }
+    public int? NapDurationSeconds { get; set; }
+    public int? UnmeasurableSleepSeconds { get; set; }
+    public int? SleepAwakeCount { get; set; }
+    public double? AverageSleepStress { get; set; }
+    public string? SleepSubScoresJson { get; set; }
     public int? Calories { get; set; }
     public int? ActiveCalories { get; set; }
+    public int? BmrCalories { get; set; }
+    public int? StepsGoal { get; set; }
+    public int? FloorsGoal { get; set; }
+    public int? IntensityGoal { get; set; }
+    public double? FloorsClimbed { get; set; }
     public int? ModerateIntensityMinutes { get; set; }
     public int? VigorousIntensityMinutes { get; set; }
+    public int? TotalIntensityMinutes { get; set; }
     public int? SleepDurationSeconds { get; set; }
     public int? DeepSleepSeconds { get; set; }
     public int? LightSleepSeconds { get; set; }
     public int? RemSleepSeconds { get; set; }
     public int? AwakeSleepSeconds { get; set; }
     public double? AverageRespirationRate { get; set; }
+    public double? AverageSleepRespirationRate { get; set; }
+    public double? MinimumRespirationRate { get; set; }
+    public double? MaximumRespirationRate { get; set; }
     public double? AverageSpo2 { get; set; }
+    public double? MinimumSpo2 { get; set; }
+    public double? LatestSpo2 { get; set; }
+    public double? AverageSleepSpo2 { get; set; }
+    public DateTimeOffset? Spo2WindowStartUtc { get; set; }
+    public DateTimeOffset? Spo2WindowEndUtc { get; set; }
+    public DateTimeOffset? WellnessStartUtc { get; set; }
+    public DateTimeOffset? WellnessEndUtc { get; set; }
+    public DateTime? WellnessStartLocal { get; set; }
+    public DateTime? WellnessEndLocal { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

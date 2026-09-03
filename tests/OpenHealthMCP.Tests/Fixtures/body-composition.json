@@ -1,0 +1,25 @@
+{
+  "dailyWeightSummaries": [
+    {
+      "summaryDate": "2026-08-31",
+      "numOfWeightEntries": 1,
+      "allWeightMetrics": [
+        {
+          "samplePk": 700001,
+          "date": 1788130800000,
+          "calendarDate": "2026-08-31",
+          "weight": 74200,
+          "bmi": 22.9,
+          "bodyFat": 14.8,
+          "bodyWater": 61.2,
+          "boneMass": 3400,
+          "muscleMass": 59800,
+          "visceralFat": 5,
+          "metabolicAge": 34,
+          "sourceType": "INDEX_SCALE",
+          "timestampGMT": 1788130800000
+        }
+      ]
+    }
+  ]
+}

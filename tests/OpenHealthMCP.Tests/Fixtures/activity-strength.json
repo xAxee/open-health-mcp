@@ -1,0 +1,15 @@
+{
+  "activityId": 900000003,
+  "activityName": "Sanitized strength session",
+  "activityType": { "typeKey": "strength_training" },
+  "startTimeGMT": "2026-08-27 17:00:00",
+  "duration": 3300,
+  "elapsedDuration": 3600,
+  "movingDuration": 2050,
+  "calories": 410,
+  "averageHR": 108,
+  "maxHR": 154,
+  "aerobicTrainingEffect": 1.8,
+  "anaerobicTrainingEffect": 2.7,
+  "activityTrainingLoad": 74
+}

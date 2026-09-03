@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OpenHealthMCP.Data;
@@ -12,9 +13,11 @@ using OpenHealthMCP.Data;
 namespace OpenHealthMCP.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260903080753_ExtendActivitySummary")]
+    partial class ExtendActivitySummary
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -429,191 +432,6 @@ namespace OpenHealthMCP.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("activity_streams", (string)null);
-                });
-
-            modelBuilder.Entity("OpenHealthMCP.Data.Entities.BloodPressureMeasurement", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("Diastolic")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ExternalId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateOnly>("LocalDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("ProviderSourceType")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<int?>("Pulse")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("SourceType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<int>("Systolic")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("TimestampLocal")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<DateTimeOffset>("TimestampUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Source", "ExternalId")
-                        .IsUnique();
-
-                    b.HasIndex("Source", "LocalDate");
-
-                    b.HasIndex("Source", "TimestampUtc");
-
-                    b.ToTable("blood_pressure_measurements", (string)null);
-                });
-
-            modelBuilder.Entity("OpenHealthMCP.Data.Entities.BodyCompositionMeasurement", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<double?>("Bmi")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("BodyFatPercent")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("BodyWaterPercent")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("BoneMassKilograms")
-                        .HasColumnType("double precision");
-
-                    b.Property<string>("ExternalId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateOnly>("LocalDate")
-                        .HasColumnType("date");
-
-                    b.Property<double?>("MetabolicAge")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("MuscleMassKilograms")
-                        .HasColumnType("double precision");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("SourceType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<DateTimeOffset>("TimestampUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<double?>("VisceralFat")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("WeightKilograms")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Source", "ExternalId")
-                        .IsUnique();
-
-                    b.HasIndex("Source", "LocalDate");
-
-                    b.HasIndex("Source", "TimestampUtc");
-
-                    b.ToTable("body_composition_measurements", (string)null);
-                });
-
-            modelBuilder.Entity("OpenHealthMCP.Data.Entities.ConfiguredHeartRateZone", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<double?>("LactateThresholdHeartRateUsed")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("MaxHeartRateUsed")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("RestingHeartRateUsed")
-                        .HasColumnType("double precision");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("Sport")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("TrainingMethod")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<double?>("Zone1Floor")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("Zone2Floor")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("Zone3Floor")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("Zone4Floor")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("Zone5Floor")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Source", "Sport")
-                        .IsUnique();
-
-                    b.ToTable("configured_heart_rate_zones", (string)null);
                 });
 
             modelBuilder.Entity("OpenHealthMCP.Data.Entities.DailyMetric", b =>
@@ -1174,49 +992,6 @@ namespace OpenHealthMCP.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("sync_states", (string)null);
-                });
-
-            modelBuilder.Entity("OpenHealthMCP.Data.Entities.UserFitnessProfile", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<double?>("AchievableFitnessAge")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("FitnessAge")
-                        .HasColumnType("double precision");
-
-                    b.Property<DateTimeOffset?>("FitnessAgeUpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ProviderProfileId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<double?>("Vo2MaxCycling")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("Vo2MaxRunning")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Source")
-                        .IsUnique();
-
-                    b.ToTable("user_fitness_profiles", (string)null);
                 });
 
             modelBuilder.Entity("OpenHealthMCP.Data.Entities.ActivityHeartRateZone", b =>

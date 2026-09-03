@@ -1,0 +1,32 @@
+{
+  "calendarDate": "2026-08-31",
+  "maxStressLevel": 78,
+  "stressQualifier": "BALANCED",
+  "restStressDuration": 28800,
+  "lowStressDuration": 8400,
+  "mediumStressDuration": 3600,
+  "highStressDuration": 1200,
+  "activityStressDuration": 5400,
+  "bodyBatteryChargedValue": 61,
+  "bodyBatteryDrainedValue": 68,
+  "stressValueDescriptorsDTOList": [
+    { "key": "timestamp", "index": 0 },
+    { "key": "stressLevel", "index": 1 }
+  ],
+  "stressValuesArray": [
+    [1788134400000, 18],
+    [1788134700000, 21],
+    [1788135000000, -1],
+    [1788135300000, 35]
+  ],
+  "bodyBatteryValueDescriptorsDTOList": [
+    { "bodyBatteryValueDescriptorKey": "bodyBatteryTimestamp", "bodyBatteryValueDescriptorIndex": 0 },
+    { "bodyBatteryValueDescriptorKey": "bodyBatteryLevel", "bodyBatteryValueDescriptorIndex": 1 }
+  ],
+  "bodyBatteryValuesArray": [
+    [1788134400000, 80],
+    [1788134700000, 79],
+    [1788135000000, null],
+    [1788135300000, 76]
+  ]
+}

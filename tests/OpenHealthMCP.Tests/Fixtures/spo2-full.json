@@ -1,0 +1,12 @@
+{
+  "calendarDate": "2026-08-31",
+  "startTimestampGMT": "2026-08-30T22:00:00.000Z",
+  "endTimestampGMT": "2026-08-31T06:00:00.000Z",
+  "startTimestampLocal": "2026-08-31T00:00:00",
+  "endTimestampLocal": "2026-08-31T08:00:00",
+  "averageSpO2": 96.4,
+  "lowestSpO2": 91,
+  "latestSpO2": 97,
+  "latestSpO2TimestampGMT": "2026-08-31T05:55:00.000Z",
+  "avgSleepSpO2": 95.8
+}

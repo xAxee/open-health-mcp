@@ -1,0 +1,36 @@
+{
+  "dailySleepDTO": {
+    "calendarDate": "2026-08-31",
+    "sleepTimeSeconds": 27300,
+    "deepSleepSeconds": 5100,
+    "lightSleepSeconds": 13200,
+    "remSleepSeconds": 7200,
+    "awakeSleepSeconds": 1800,
+    "unmeasurableSleepSeconds": 0,
+    "sleepStartTimestampGMT": 1788125400000,
+    "sleepEndTimestampGMT": 1788152700000,
+    "sleepStartTimestampLocal": 1788132600000,
+    "sleepEndTimestampLocal": 1788159900000,
+    "sleepScores": {
+      "overall": { "value": 84, "qualifierKey": "GOOD" },
+      "totalDuration": { "value": 91, "qualifierKey": "EXCELLENT" },
+      "deepPercentage": { "value": 75, "qualifierKey": "GOOD" },
+      "lightPercentage": { "value": 83, "qualifierKey": "GOOD" },
+      "remPercentage": { "value": 80, "qualifierKey": "GOOD" },
+      "awakeCount": { "value": 68, "qualifierKey": "FAIR" },
+      "restlessness": { "value": 72, "qualifierKey": "GOOD" },
+      "stress": { "value": 88, "qualifierKey": "EXCELLENT" }
+    }
+  },
+  "sleepLevels": [
+    { "startGMT": "2026-08-30T21:30:00.000Z", "endGMT": "2026-08-30T21:50:00.000Z", "activityLevel": 0 },
+    { "startGMT": "2026-08-30T21:50:00.000Z", "endGMT": "2026-08-30T23:15:00.000Z", "activityLevel": 1 },
+    { "startGMT": "2026-08-30T23:15:00.000Z", "endGMT": "2026-08-31T01:20:00.000Z", "activityLevel": 2 },
+    { "startGMT": "2026-08-31T01:20:00.000Z", "endGMT": "2026-08-31T02:35:00.000Z", "activityLevel": 3 }
+  ],
+  "wellnessEpochRespirationDataDTOList": [
+    { "startTimeGMT": 1788125700000, "respirationValue": 13.2 },
+    { "startTimeGMT": 1788126000000, "respirationValue": 12.8 },
+    { "startTimeGMT": 1788126300000, "respirationValue": 13.5 }
+  ]
+}
