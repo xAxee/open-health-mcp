@@ -15,6 +15,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<HealthMetricSample> HealthMetricSamples => Set<HealthMetricSample>();
     public DbSet<RawProviderData> RawProviderData => Set<RawProviderData>();
     public DbSet<SyncState> SyncStates => Set<SyncState>();
+    public DbSet<UserFitnessProfile> UserFitnessProfiles => Set<UserFitnessProfile>();
+    public DbSet<ConfiguredHeartRateZone> ConfiguredHeartRateZones => Set<ConfiguredHeartRateZone>();
+    public DbSet<BodyCompositionMeasurement> BodyCompositionMeasurements => Set<BodyCompositionMeasurement>();
+    public DbSet<BloodPressureMeasurement> BloodPressureMeasurements => Set<BloodPressureMeasurement>();
     public DbSet<OAuthClient> OAuthClients => Set<OAuthClient>();
     public DbSet<OAuthAuthorizationCode> OAuthAuthorizationCodes => Set<OAuthAuthorizationCode>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
@@ -147,6 +151,51 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(x => x.Source).IsUnique();
             entity.Property(x => x.Source).HasMaxLength(50);
             entity.Property(x => x.LastError).HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<UserFitnessProfile>(entity =>
+        {
+            entity.ToTable("user_fitness_profiles");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.Source).IsUnique();
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.ProviderProfileId).HasMaxLength(200);
+        });
+
+        modelBuilder.Entity<ConfiguredHeartRateZone>(entity =>
+        {
+            entity.ToTable("configured_heart_rate_zones");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.Sport }).IsUnique();
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.Sport).HasMaxLength(100);
+            entity.Property(x => x.TrainingMethod).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<BodyCompositionMeasurement>(entity =>
+        {
+            entity.ToTable("body_composition_measurements");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.ExternalId }).IsUnique();
+            entity.HasIndex(x => new { x.Source, x.LocalDate });
+            entity.HasIndex(x => new { x.Source, x.TimestampUtc });
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.ExternalId).HasMaxLength(200);
+            entity.Property(x => x.SourceType).HasMaxLength(30);
+        });
+
+        modelBuilder.Entity<BloodPressureMeasurement>(entity =>
+        {
+            entity.ToTable("blood_pressure_measurements");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Source, x.ExternalId }).IsUnique();
+            entity.HasIndex(x => new { x.Source, x.LocalDate });
+            entity.HasIndex(x => new { x.Source, x.TimestampUtc });
+            entity.Property(x => x.Source).HasMaxLength(50);
+            entity.Property(x => x.ExternalId).HasMaxLength(200);
+            entity.Property(x => x.ProviderSourceType).HasMaxLength(100);
+            entity.Property(x => x.SourceType).HasMaxLength(30);
+            entity.Property(x => x.TimestampLocal).HasColumnType("timestamp without time zone");
         });
 
         modelBuilder.Entity<OAuthClient>(entity =>

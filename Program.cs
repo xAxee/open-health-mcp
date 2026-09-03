@@ -72,7 +72,8 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<HealthTools>()
-    .WithTools<SeriesTools>();
+    .WithTools<SeriesTools>()
+    .WithTools<ProfileTools>();
 
 var app = builder.Build();
 

@@ -1,0 +1,11 @@
+[
+  {
+    "version": 800001,
+    "measurementTimestampGMT": "2026-08-31T05:45:00.000Z",
+    "measurementTimestampLocal": "2026-08-31T07:45:00",
+    "systolic": 118,
+    "diastolic": 76,
+    "pulse": 54,
+    "sourceType": "MANUAL"
+  }
+]

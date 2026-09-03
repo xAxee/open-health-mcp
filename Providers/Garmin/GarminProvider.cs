@@ -89,6 +89,22 @@ internal sealed class GarminProvider(
             failures,
             cancellationToken);
 
+        await RunUnitAsync(
+            "fitness profile",
+            () => SyncFitnessProfileAsync(to, cancellationToken),
+            failures,
+            cancellationToken);
+        await RunUnitAsync(
+            $"body composition for {from} through {to}",
+            () => SyncBodyCompositionAsync(from, to, cancellationToken),
+            failures,
+            cancellationToken);
+        await RunUnitAsync(
+            $"blood pressure for {from} through {to}",
+            () => SyncBloodPressureAsync(from, to, cancellationToken),
+            failures,
+            cancellationToken);
+
         logger.LogInformation(
             "Garmin sync persisted {DailyUpdates} daily segments and {ActivityUpdates} activities",
             dailyUpdates,
@@ -100,6 +116,178 @@ internal sealed class GarminProvider(
                 $"Garmin synchronization completed with {failures.Count} failed data unit(s).",
                 failures);
         }
+    }
+
+    private async Task<int> SyncFitnessProfileAsync(DateOnly date, CancellationToken cancellationToken)
+    {
+        var settingsPayload = await FetchPayloadAsync(
+            "user settings",
+            "/userprofile-service/userprofile/user-settings",
+            () => session.Client.GetUserSettings(cancellationToken),
+            cancellationToken);
+        var fitnessAgePayload = await FetchPayloadAsync(
+            "fitness age",
+            "/fitnessage-service/fitnessage/",
+            () => session.Client.GetFitnessAge(date.ToDateTime(TimeOnly.MinValue), cancellationToken),
+            cancellationToken);
+        var zonesPayload = await FetchPayloadAsync(
+            "configured heart rate zones",
+            "/biometric-service/heartRateZones",
+            () => session.Client.GetHeartRateZones(cancellationToken),
+            cancellationToken);
+        if (settingsPayload is null && fitnessAgePayload is null && zonesPayload is null)
+        {
+            return 0;
+        }
+
+        GarminUserSettingsData settings = new(null, null);
+        GarminFitnessAgeData fitnessAge = new(null, null, null);
+        IReadOnlyList<GarminConfiguredZoneData> zones = [];
+        if (settingsPayload is not null)
+        {
+            using var document = JsonDocument.Parse(settingsPayload.Payload);
+            settings = GarminProfilePayloadParser.ParseSettings(document.RootElement);
+        }
+        if (fitnessAgePayload is not null)
+        {
+            using var document = JsonDocument.Parse(fitnessAgePayload.Payload);
+            fitnessAge = GarminProfilePayloadParser.ParseFitnessAge(document.RootElement);
+        }
+        if (zonesPayload is not null)
+        {
+            using var document = JsonDocument.Parse(zonesPayload.Payload);
+            zones = GarminProfilePayloadParser.ParseConfiguredZones(document.RootElement);
+        }
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var profile = await dbContext.UserFitnessProfiles.SingleOrDefaultAsync(
+            item => item.Source == SourceName, cancellationToken);
+        if (profile is null)
+        {
+            profile = new UserFitnessProfile { Source = SourceName };
+            dbContext.UserFitnessProfiles.Add(profile);
+        }
+        profile.Vo2MaxRunning = settings.Vo2MaxRunning;
+        profile.Vo2MaxCycling = settings.Vo2MaxCycling;
+        profile.FitnessAge = fitnessAge.FitnessAge;
+        profile.AchievableFitnessAge = fitnessAge.AchievableFitnessAge;
+        profile.FitnessAgeUpdatedAt = fitnessAge.UpdatedAt;
+        profile.UpdatedAt = now;
+
+        var existingZones = await dbContext.ConfiguredHeartRateZones
+            .Where(item => item.Source == SourceName).ToListAsync(cancellationToken);
+        dbContext.ConfiguredHeartRateZones.RemoveRange(existingZones);
+        dbContext.ConfiguredHeartRateZones.AddRange(zones.Select(zone => new ConfiguredHeartRateZone
+        {
+            Source = SourceName,
+            Sport = zone.Sport,
+            TrainingMethod = zone.TrainingMethod,
+            RestingHeartRateUsed = zone.RestingHeartRateUsed,
+            LactateThresholdHeartRateUsed = zone.LactateThresholdHeartRateUsed,
+            MaxHeartRateUsed = zone.MaxHeartRateUsed,
+            Zone1Floor = zone.Zone1Floor,
+            Zone2Floor = zone.Zone2Floor,
+            Zone3Floor = zone.Zone3Floor,
+            Zone4Floor = zone.Zone4Floor,
+            Zone5Floor = zone.Zone5Floor,
+            UpdatedAt = now
+        }));
+        if (settingsPayload is not null)
+            await UpsertRawAsync(dbContext, "user_settings", "current", settingsPayload, now, cancellationToken);
+        if (fitnessAgePayload is not null)
+            await UpsertRawAsync(dbContext, "fitness_age", date.ToString("yyyy-MM-dd"), fitnessAgePayload, now, cancellationToken);
+        if (zonesPayload is not null)
+            await UpsertRawAsync(dbContext, "configured_hr_zones", "current", zonesPayload, now, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return 1;
+    }
+
+    private async Task<int> SyncBodyCompositionAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    {
+        var payload = await FetchPayloadAsync(
+            "body composition",
+            "/weight-service/weight/range/",
+            () => session.Client.GetWeightRange(from.ToDateTime(TimeOnly.MinValue), to.ToDateTime(TimeOnly.MaxValue), cancellationToken),
+            cancellationToken);
+        if (payload is null) return 0;
+        using var document = JsonDocument.Parse(payload.Payload);
+        var measurements = GarminProfilePayloadParser.ParseBodyComposition(document.RootElement);
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var value in measurements)
+        {
+            var entity = await dbContext.BodyCompositionMeasurements.SingleOrDefaultAsync(
+                item => item.Source == SourceName && item.ExternalId == value.ExternalId, cancellationToken);
+            if (entity is null)
+            {
+                entity = new BodyCompositionMeasurement
+                {
+                    Source = SourceName,
+                    ExternalId = value.ExternalId,
+                    SourceType = "garmin_api"
+                };
+                dbContext.BodyCompositionMeasurements.Add(entity);
+            }
+            entity.LocalDate = value.LocalDate;
+            entity.TimestampUtc = value.TimestampUtc;
+            entity.WeightKilograms = value.WeightKilograms;
+            entity.Bmi = value.Bmi;
+            entity.BodyFatPercent = value.BodyFatPercent;
+            entity.MuscleMassKilograms = value.MuscleMassKilograms;
+            entity.BoneMassKilograms = value.BoneMassKilograms;
+            entity.BodyWaterPercent = value.BodyWaterPercent;
+            entity.VisceralFat = value.VisceralFat;
+            entity.MetabolicAge = value.MetabolicAge;
+            entity.SourceType = "garmin_api";
+            entity.UpdatedAt = now;
+        }
+        await UpsertRawAsync(dbContext, "body_composition", $"{from:yyyy-MM-dd}:{to:yyyy-MM-dd}", payload, now, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Garmin body composition sync parsed {Count} sparse measurements", measurements.Count);
+        return measurements.Count;
+    }
+
+    private async Task<int> SyncBloodPressureAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    {
+        var payload = await FetchPayloadAsync(
+            "blood pressure",
+            "/bloodpressure-service/bloodpressure/daily/last/",
+            () => session.Client.GetBloodPressureRange(from.ToDateTime(TimeOnly.MinValue), to.ToDateTime(TimeOnly.MaxValue), cancellationToken),
+            cancellationToken);
+        if (payload is null) return 0;
+        using var document = JsonDocument.Parse(payload.Payload);
+        var measurements = GarminProfilePayloadParser.ParseBloodPressure(document.RootElement);
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var value in measurements)
+        {
+            var entity = await dbContext.BloodPressureMeasurements.SingleOrDefaultAsync(
+                item => item.Source == SourceName && item.ExternalId == value.ExternalId, cancellationToken);
+            if (entity is null)
+            {
+                entity = new BloodPressureMeasurement
+                {
+                    Source = SourceName,
+                    ExternalId = value.ExternalId,
+                    SourceType = "garmin_api"
+                };
+                dbContext.BloodPressureMeasurements.Add(entity);
+            }
+            entity.LocalDate = value.LocalDate;
+            entity.TimestampUtc = value.TimestampUtc;
+            entity.TimestampLocal = value.TimestampLocal;
+            entity.Systolic = value.Systolic;
+            entity.Diastolic = value.Diastolic;
+            entity.Pulse = value.Pulse;
+            entity.ProviderSourceType = value.ProviderSourceType;
+            entity.SourceType = "garmin_api";
+            entity.UpdatedAt = now;
+        }
+        await UpsertRawAsync(dbContext, "blood_pressure", $"{from:yyyy-MM-dd}:{to:yyyy-MM-dd}", payload, now, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Garmin blood pressure sync parsed {Count} sparse measurements", measurements.Count);
+        return measurements.Count;
     }
 
     private async Task<int> SyncDailySummaryAsync(DateOnly date, CancellationToken cancellationToken)
