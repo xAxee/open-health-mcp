@@ -204,7 +204,7 @@ Never commit `.env`. It is ignored by Git.
 
 ## Authentication
 
-`GET /health` and OAuth discovery/authorization endpoints are public. The MCP endpoint accepts either an OAuth access token or the static installation token. Manual clients can use:
+`GET /health` and OAuth discovery/authorization endpoints are public. The MCP endpoint and MCP synchronization endpoints accept either an OAuth access token or the static installation token. Manual clients can use:
 
 ```http
 Authorization: Bearer <MCP_AUTH_TOKEN>
@@ -269,9 +269,25 @@ Laps, activity heart-rate-zone time, and streams require optional Garmin request
 
 Daily heart-rate samples are normalized from the existing daily heart-rate response without another Garmin request. Stress and Body Battery timelines use one `/wellness-service/wellness/dailyStress/` request per synchronized date. Normalized daily timelines use a rolling 365-day retention window: older historical sync dates keep their scalar daily metrics and existing raw payloads but do not trigger `dailyStress` requests or retain dense normalized samples. Each retained series is stored as one compact `jsonb` document rather than one database row per sample. This keeps idempotent updates and reads inexpensive while preserving the original provider response separately.
 
-### Historical synchronization
+### Manual synchronization
 
-Use the authenticated admin endpoint:
+Trigger the same recent-period refresh used by the scheduler through the MCP API:
+
+```bash
+curl --request POST http://localhost:8080/mcp/sync \
+  --header "Authorization: Bearer replace-with-your-access-token"
+```
+
+The endpoint synchronizes today and the configured `SYNC_LOOKBACK_DAYS` window from Garmin into PostgreSQL. It returns the completed date range, provider and chunk counts, and completion timestamp. To inspect synchronization state without starting a new refresh:
+
+```bash
+curl http://localhost:8080/mcp/sync \
+  --header "Authorization: Bearer replace-with-your-access-token"
+```
+
+The response includes `lastSuccessfulSyncAt`, `lastAttemptAt`, and the last safe provider error (if any). Timestamps are UTC offsets; `lastSuccessfulSyncAt` is `null` until the first successful synchronization.
+
+For a custom historical range, use the static-token-only admin endpoint:
 
 ```bash
 curl --request POST http://localhost:8080/admin/sync \

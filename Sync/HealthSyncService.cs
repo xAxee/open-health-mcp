@@ -15,6 +15,15 @@ public sealed class HealthSyncService(
     private readonly IReadOnlyList<IHealthDataProvider> _providers = providers.ToArray();
     private readonly SemaphoreSlim _syncLock = new(1, 1);
 
+    public Task<SyncResult> SyncRecentAsync(CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        return SyncRangeAsync(
+            today.AddDays(-(options.LookbackDays - 1)),
+            today,
+            cancellationToken);
+    }
+
     public async Task<SyncResult> SyncRangeAsync(
         DateOnly from,
         DateOnly to,
@@ -103,8 +112,7 @@ public sealed class HealthSyncService(
     {
         try
         {
-            var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-            await SyncRangeAsync(today.AddDays(-(options.LookbackDays - 1)), today, cancellationToken);
+            await SyncRecentAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

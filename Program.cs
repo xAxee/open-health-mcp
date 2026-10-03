@@ -85,6 +85,7 @@ app.UseRateLimiter();
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 app.MapOAuthEndpoints(oauthOptions);
+app.MapMcpSyncEndpoints();
 
 app.MapPost("/admin/sync", async (
     AdminSyncRequest request,
