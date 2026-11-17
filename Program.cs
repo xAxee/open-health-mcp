@@ -73,7 +73,8 @@ builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<HealthTools>()
     .WithTools<SeriesTools>()
-    .WithTools<ProfileTools>();
+    .WithTools<ProfileTools>()
+    .WithTools<SyncTools>();
 
 var app = builder.Build();
 
