@@ -15,6 +15,36 @@ public sealed class HealthSyncService(
     private readonly IReadOnlyList<IHealthDataProvider> _providers = providers.ToArray();
     private readonly SemaphoreSlim _syncLock = new(1, 1);
 
+    public async Task<SyncRequestResult> RequestRecentSyncAsync(CancellationToken cancellationToken)
+    {
+        await _syncLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var sources = _providers.Select(provider => provider.Name).ToArray();
+            var lastAttempt = await dbContext.SyncStates.AsNoTracking()
+                .Where(state => sources.Contains(state.Source))
+                .MaxAsync(state => state.LastAttemptAt, cancellationToken);
+            var nextAllowedAt = lastAttempt?.AddMinutes(5);
+            if (nextAllowedAt > timeProvider.GetUtcNow())
+            {
+                return new SyncRequestResult("cooldown", nextAllowedAt, null);
+            }
+
+            var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+            var result = await SyncRangeCoreAsync(
+                today.AddDays(-(options.LookbackDays - 1)), today, cancellationToken);
+            var latestAttempt = await dbContext.SyncStates.AsNoTracking()
+                .Where(state => sources.Contains(state.Source))
+                .MaxAsync(state => state.LastAttemptAt, cancellationToken);
+            return new SyncRequestResult("completed", latestAttempt?.AddMinutes(5), result);
+        }
+        finally
+        {
+            _syncLock.Release();
+        }
+    }
+
     public Task<SyncResult> SyncRecentAsync(CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
@@ -34,59 +64,65 @@ public sealed class HealthSyncService(
 
         try
         {
-            logger.LogInformation("Health synchronization started for {From} through {To}", from, to);
-            var chunksCompleted = 0;
-            var providersCompleted = 0;
-
-            foreach (var provider in _providers)
-            {
-                await RecordAttemptAsync(provider.Name, cancellationToken);
-
-                try
-                {
-                    var chunkStart = from;
-                    while (chunkStart <= to)
-                    {
-                        var chunkEnd = Min(chunkStart.AddDays(options.HistoricalChunkDays - 1), to);
-                        logger.LogInformation(
-                            "Synchronizing {Source} range {From} through {To}",
-                            provider.Name,
-                            chunkStart,
-                            chunkEnd);
-
-                        await provider.SyncAsync(chunkStart, chunkEnd, cancellationToken);
-                        chunksCompleted++;
-                        chunkStart = chunkEnd.AddDays(1);
-                    }
-
-                    await RecordSuccessAsync(provider.Name, cancellationToken);
-                    providersCompleted++;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception exception)
-                {
-                    var safeError = SafeError(exception);
-                    await RecordFailureAsync(provider.Name, safeError, cancellationToken);
-                    logger.LogError(
-                        "Synchronization failed for {Source}: {Error}",
-                        provider.Name,
-                        safeError);
-                    throw new InvalidOperationException(
-                        $"Synchronization failed for provider '{provider.Name}': {safeError}");
-                }
-            }
-
-            var completedAt = timeProvider.GetUtcNow();
-            logger.LogInformation("Health synchronization completed at {CompletedAt}", completedAt);
-            return new SyncResult(from, to, providersCompleted, chunksCompleted, completedAt);
+            return await SyncRangeCoreAsync(from, to, cancellationToken);
         }
         finally
         {
             _syncLock.Release();
         }
+    }
+
+    private async Task<SyncResult> SyncRangeCoreAsync(
+        DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Health synchronization started for {From} through {To}", from, to);
+        var chunksCompleted = 0;
+        var providersCompleted = 0;
+
+        foreach (var provider in _providers)
+        {
+            await RecordAttemptAsync(provider.Name, cancellationToken);
+
+            try
+            {
+                var chunkStart = from;
+                while (chunkStart <= to)
+                {
+                    var chunkEnd = Min(chunkStart.AddDays(options.HistoricalChunkDays - 1), to);
+                    logger.LogInformation(
+                        "Synchronizing {Source} range {From} through {To}",
+                        provider.Name,
+                        chunkStart,
+                        chunkEnd);
+
+                    await provider.SyncAsync(chunkStart, chunkEnd, cancellationToken);
+                    chunksCompleted++;
+                    chunkStart = chunkEnd.AddDays(1);
+                }
+
+                await RecordSuccessAsync(provider.Name, cancellationToken);
+                providersCompleted++;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var safeError = SafeError(exception);
+                await RecordFailureAsync(provider.Name, safeError, cancellationToken);
+                logger.LogError(
+                    "Synchronization failed for {Source}: {Error}",
+                    provider.Name,
+                    safeError);
+                throw new InvalidOperationException(
+                    $"Synchronization failed for provider '{provider.Name}': {safeError}");
+            }
+        }
+
+        var completedAt = timeProvider.GetUtcNow();
+        logger.LogInformation("Health synchronization completed at {CompletedAt}", completedAt);
+        return new SyncResult(from, to, providersCompleted, chunksCompleted, completedAt);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

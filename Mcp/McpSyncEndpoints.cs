@@ -6,8 +6,6 @@ namespace OpenHealthMCP.Mcp;
 
 public static class McpSyncEndpoints
 {
-    private const string GarminSource = "garmin";
-
     public static IEndpointRouteBuilder MapMcpSyncEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/mcp/sync")
@@ -25,7 +23,7 @@ public static class McpSyncEndpoints
     {
         try
         {
-            return Results.Ok(await syncService.SyncRecentAsync(cancellationToken));
+            return Results.Ok(await syncService.RequestRecentSyncAsync(cancellationToken));
         }
         catch (InvalidOperationException exception)
         {
@@ -40,17 +38,7 @@ public static class McpSyncEndpoints
         IDbContextFactory<AppDbContext> dbContextFactory,
         CancellationToken cancellationToken)
     {
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var state = await dbContext.SyncStates.AsNoTracking()
-            .Where(item => item.Source == GarminSource)
-            .Select(item => new LastSynchronizationResult(
-                item.Source,
-                item.LastSuccessfulSyncAt,
-                item.LastAttemptAt,
-                item.LastError))
-            .SingleOrDefaultAsync(cancellationToken);
-
-        return Results.Ok(state ?? new LastSynchronizationResult(GarminSource, null, null, null));
+        return Results.Ok(await SyncTools.GetSyncStatusAsync(dbContextFactory, cancellationToken));
     }
 }
 

@@ -11,3 +11,5 @@ Canonical `get_day_series` and `get_activity_series` MCP tools are implemented a
 Activity summaries now include confirmed min/max elevation, maximum 20-minute power, running dynamics, and Garmin multisport parent metadata. Activity listing supports bounded offset pagination. Garmin HR-zone low boundaries remain authoritative; high boundaries are derived only from the next Garmin floor and explicitly labelled.
 
 Current validation: production build passes; 26 standard xUnit tests pass. Active integration and migration tests pass on PostgreSQL 17, including upgrades retaining historical daily, raw, and activity records.
+
+On-demand synchronization is available as the MCP write tool `sync_recent`, with optional local status via `get_sync_status`. Both `sync_recent` and `POST /mcp/sync` use a fixed five-minute cooldown since the last persisted provider attempt, checked under the synchronization lock; no Garmin preflight check is made. Replies contain `status`, `nextAllowedAt`, and nullable `result`. Scheduled/admin synchronization behavior is unchanged.

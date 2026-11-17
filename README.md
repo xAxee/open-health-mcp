@@ -1,6 +1,6 @@
 # OpenHealthMCP
 
-OpenHealthMCP is a self-hosted personal health data layer for MCP-compatible AI assistants. It synchronizes health and activity data into your own PostgreSQL database and exposes normalized, read-only data through a remote MCP server. Garmin Connect is the first supported provider.
+OpenHealthMCP is a self-hosted personal health data layer for MCP-compatible AI assistants. It synchronizes health and activity data into your own PostgreSQL database and exposes normalized data and on-demand synchronization through a remote MCP server. Garmin Connect is the first supported provider.
 
 OpenHealthMCP does not contain or call an LLM. It is designed for exactly one self-hosted user per installation.
 
@@ -15,7 +15,7 @@ OpenHealthMCP does not contain or call an LLM. It is designed for exactly one se
 - Original Garmin JSON response records preserved as PostgreSQL `jsonb`.
 - Automatic refresh of recent days with a configurable interval and lookback.
 - Authenticated historical backfill processed in bounded chunks.
-- Remote Streamable HTTP MCP server with twelve provider-neutral, read-only tools.
+- Remote Streamable HTTP MCP server with health query tools and on-demand synchronization tools.
 - Constant-time Bearer token authentication.
 - Automatic EF Core migrations with startup retry.
 - Docker Compose deployment with private PostgreSQL networking and persistent volumes.
@@ -221,7 +221,7 @@ OpenHealthMCP implements OAuth 2.1 authorization code flow for public clients wi
 - Dynamic Client Registration (RFC 7591);
 - mandatory PKCE using `S256`;
 - exact redirect URI validation and MCP resource binding;
-- the single read-only scope `health.read`;
+- the single scope `health.read`, which grants health queries and local synchronization (including `sync_recent`);
 - one-time authorization codes valid for 5 minutes;
 - access tokens valid for 1 hour;
 - rotating refresh tokens valid for 30 days.
@@ -271,6 +271,10 @@ Daily heart-rate samples are normalized from the existing daily heart-rate respo
 
 ### Manual synchronization
 
+AI assistants connected to `/mcp` can call `sync_recent` directly through MCP `tools/call`; a separate REST request or new-data check is unnecessary. `get_sync_status` is available as an optional local-state query. `sync_recent` applies a fixed five-minute cooldown based on the last persisted provider attempt, including failed, scheduled and admin attempts. During cooldown it returns `status: "cooldown"`, `nextAllowedAt` (UTC), and `result: null` without contacting Garmin. Otherwise it waits for completion and returns `status: "completed"`, `nextAllowedAt`, and a `result` containing the synchronized range, provider/chunk counts and completion time. The cooldown is checked under the shared synchronization lock and survives restarts. Provider failures are MCP tool errors, not successful refreshes. Both OAuth and static-token MCP clients can use it.
+
+No preflight request is made to Garmin to check for new activity or sleep. The optional status tool describes local synchronization history only. Synchronization refreshes the configured recent window even when nothing changed, and cannot force a watch upload to Garmin Connect.
+
 Trigger the same recent-period refresh used by the scheduler through the MCP API:
 
 ```bash
@@ -278,7 +282,7 @@ curl --request POST http://localhost:8080/mcp/sync \
   --header "Authorization: Bearer replace-with-your-access-token"
 ```
 
-The endpoint synchronizes today and the configured `SYNC_LOOKBACK_DAYS` window from Garmin into PostgreSQL. It returns the completed date range, provider and chunk counts, and completion timestamp. To inspect synchronization state without starting a new refresh:
+The endpoint synchronizes today and the configured `SYNC_LOOKBACK_DAYS` window from Garmin into PostgreSQL. It uses the same five-minute cooldown and response envelope as `sync_recent`. Scheduled and historical admin syncs retain their existing behavior. To inspect synchronization state without starting a new refresh:
 
 ```bash
 curl http://localhost:8080/mcp/sync \
@@ -323,6 +327,8 @@ Available tools:
 
 | Tool | Purpose |
 |---|---|
+| `sync_recent` | Refresh recent Garmin health, activity and sleep data in the local database. |
+| `get_sync_status` | Inspect the last successful synchronization, attempt and error without contacting Garmin. |
 | `get_day` | Return normalized metrics for one date. |
 | `get_activities` | Return lightweight activity summaries in a date range, with optional type and bounded limit. |
 | `get_activity` | Return one normalized activity with all available scalar activity and training-effect metrics. |
@@ -376,7 +382,7 @@ activity_anaerobic_training_effect
 activity_vo2_max
 ```
 
-MCP tools query PostgreSQL only. They do not contact Garmin, modify health data, expose raw provider payloads, or provide medical diagnoses.
+Health query tools read PostgreSQL only. `sync_recent` contacts Garmin and updates the local database using the same service, lookback window, and synchronization lock as `POST /mcp/sync`. It is advertised as a non-destructive write tool. It does not modify data in Garmin. Tools do not expose raw provider payloads or provide medical diagnoses.
 
 `get_activity_laps` and `get_activity_hr_zones` return `found`, `source`, `activityId`, `synchronized`, and an ordered collection. `synchronized=false` means the optional Garmin enrichment has not completed. `synchronized=true` with an empty collection means no entries were returned or expected. HR-zone percentages are calculated only from Garmin's `secsInZone` values, using their sum as the denominator. Low boundaries are Garmin-provided. A high boundary is exposed only when it follows deterministically from the next Garmin low boundary; it is marked `derived_by_openhealth`, and the final open-ended zone stays `null`. Age-based zone formulas are never used.
 
